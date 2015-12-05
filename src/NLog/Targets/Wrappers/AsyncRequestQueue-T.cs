@@ -85,7 +85,7 @@ namespace NLog.Targets.Wrappers
             {
                 if (this.logEventInfoQueue.Count >= this.RequestLimit)
                 {
-                    InternalLogger.Debug("Async queue is full");
+                    InternalLogger.Debug("Async queue is full: " + RequestLimit.ToString("N"));
                     switch (this.OnOverflow)
                     {
                         case AsyncTargetWrapperOverflowAction.Discard:
