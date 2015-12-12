@@ -149,7 +149,8 @@ namespace NLog
             if ((formatProvider == null) && (LogManager.Configuration != null))
                 formatProvider = LogManager.Configuration.DefaultCultureInfo;
 
-            return String.Format(formatProvider, "{0}", o);
+            return Convert.ToString(0, formatProvider);
+
         }
     }
 }
