@@ -9,5 +9,3 @@ CALL dnu build tests/SampleExtensions --quiet
 CALL dnu build tests/NLog.UnitTests --quiet
 
 call dnx -p tests\NLog.UnitTests test
-
-pause
