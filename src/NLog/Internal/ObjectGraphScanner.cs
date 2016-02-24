@@ -54,7 +54,7 @@ namespace NLog.Internal
         /// <typeparam name="T">Type of the objects to return.</typeparam>
         /// <param name="rootObjects">The root objects.</param>
         /// <returns>Ordered list of objects implementing T.</returns>
-        public static T[] FindReachableObjects<T>(params object[] rootObjects)
+        public static List<T> FindReachableObjects<T>(params object[] rootObjects)
             where T : class
         {
             InternalLogger.Trace("FindReachableObject<{0}>:", typeof(T));
@@ -67,7 +67,7 @@ namespace NLog.Internal
                 ScanProperties(result, rootObject, 0, visitedObjects);
             }
 
-            return result.ToArray();
+            return result.ToList();
         }
 
         private static void ScanProperties<T>(List<T> result, object o, int level, HashSet<object> visitedObjects)
