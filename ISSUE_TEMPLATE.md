@@ -1,5 +1,8 @@
-Hi! Thanks for reporting this feature/bug/question! Please keep / fill in the relevant info from this template so that we can help you as best as possible.
+Hi! Thanks for reporting this feature/bug/question! 
 
+Please keep / fill in the relevant info from this template so that we can help you as best as possible.
+
+For .NET Core users, please check the platform support: https://github.com/NLog/NLog/wiki/platform-support
 
 **Type** (choose one):
 
@@ -10,7 +13,7 @@ Hi! Thanks for reporting this feature/bug/question! Please keep / fill in the re
 
 **NLog version**: (e.g. 4.2.3)
 
-**Platform**: .Net 3.5 / .Net 4.0 / .Net 4.5 / Mono 4 / Silverlight 4 / Silverlight 5 / Xamarin Android / Xamarin iOs
+**Platform**: .Net 3.5 / .Net 4.0 / .Net 4.5 / Mono 4 / Silverlight 4 / Silverlight 5 / Xamarin Android / Xamarin iOs / .NET Core 
 
 **Current NLog config** (xml or C#, if relevant)
 

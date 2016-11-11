@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2011 Jaroslaw Kowalski <jaak@jkowalski.net>
+// Copyright (c) 2004-2016 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -74,6 +74,14 @@ namespace NLog.Internal
         public static bool IsUnix
         {
             get { return currentOS == RuntimeOS.Unix; }
+        }
+
+        /// <summary>
+        /// Gets a value indicating whether current runtime is Mono-based
+        /// </summary>
+        public static bool IsMono
+        {
+            get { return Type.GetType("Mono.Runtime") != null; }
         }
         
         private static RuntimeOS GetCurrentRuntimeOS()

@@ -1,5 +1,5 @@
-﻿// 
-// Copyright (c) 2004-2011 Jaroslaw Kowalski <jaak@jkowalski.net>
+// 
+// Copyright (c) 2004-2016 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -31,10 +31,16 @@
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
 
+#if !SILVERLIGHT && !__ANDROID__ && !__IOS__
+// Unfortunately, Xamarin Android and Xamarin iOS don't support mutexes (see https://github.com/mono/mono/blob/3a9e18e5405b5772be88bfc45739d6a350560111/mcs/class/corlib/System.Threading/Mutex.cs#L167) so the BaseFileAppender class now throws an exception in the constructor.
+#define SupportsMutex
+#endif
+
 namespace NLog.Internal.FileAppenders
 {
     using System;
     using System.IO;
+    using System.Threading;
 
     /// <summary>
     /// Maintains a collection of file appenders usually associated with file targets.
@@ -44,8 +50,8 @@ namespace NLog.Internal.FileAppenders
         private BaseFileAppender[] appenders;
 #if !SILVERLIGHT && !__IOS__ && !__ANDROID__
         private string archiveFilePatternToWatch = null;
-        private bool logFileWasArchived = false;
         private readonly MultiFileWatcher externalFileArchivingWatcher = new MultiFileWatcher(NotifyFilters.FileName);
+        private bool logFileWasArchived = false;
 #endif
 
         /// <summary>
@@ -58,7 +64,7 @@ namespace NLog.Internal.FileAppenders
         /// list of appenders.
         /// </summary>
         private FileAppenderCache() : this(0, null, null) { }
-        
+
         /// <summary>
         /// Initializes a new instance of the <see cref="FileAppenderCache"/> class.
         /// </summary>
@@ -134,7 +140,7 @@ namespace NLog.Internal.FileAppenders
         /// Gets the number of appenders which the list can hold.
         /// </summary>
         public int Size { get; private set; }
-        
+
         /// <summary>
         /// It allocates the first slot in the list when the file name does not already in the list and clean up any
         /// unused slots.
@@ -215,7 +221,7 @@ namespace NLog.Internal.FileAppenders
                 }
 #endif
             }
-            
+
             return appenderToWrite;
         }
 
@@ -286,12 +292,7 @@ namespace NLog.Internal.FileAppenders
             }
         }
 
-        /// <summary>
-        /// Gets the file info for a particular appender.
-        /// </summary>
-        /// <param name="fileName">The file name associated with a particular appender.</param>
-        /// <returns>The file characteristics, if the file information was retrieved successfully, otherwise null.</returns>
-        public FileCharacteristics GetFileCharacteristics(string fileName)
+        private BaseFileAppender GetAppender(string fileName)
         {
             foreach (BaseFileAppender appender in appenders)
             {
@@ -299,17 +300,79 @@ namespace NLog.Internal.FileAppenders
                     break;
 
                 if (appender.FileName == fileName)
-                    return appender.GetFileCharacteristics();
+                    return appender;
             }
 
             return null;
         }
 
+#if SupportsMutex
+        public Mutex GetArchiveMutex(string fileName)
+        {
+            var appender = GetAppender(fileName);
+            return appender == null ? null : appender.ArchiveMutex;
+        }
+#endif
+
+        public DateTime? GetFileCreationTimeUtc(string filePath, bool fallback)
+        {
+            var appender = GetAppender(filePath);
+            DateTime? result = null;
+            if (appender != null)
+                result = appender.GetFileCreationTimeUtc();
+            if (result == null && fallback)
+            {
+                var fileInfo = new FileInfo(filePath);
+                if (fileInfo.Exists)
+                {
+                    return fileInfo.GetCreationTimeUtc();
+                }
+            }
+
+            return result;
+        }
+
+        public DateTime? GetFileLastWriteTimeUtc(string filePath, bool fallback)
+        {
+            var appender = GetAppender(filePath);
+            DateTime? result = null;
+            if (appender != null)
+                result = appender.GetFileLastWriteTimeUtc();
+            if (result == null && fallback)
+            {
+                var fileInfo = new FileInfo(filePath);
+                if (fileInfo.Exists)
+                {
+                    return fileInfo.GetLastWriteTimeUtc();
+                }
+            }
+
+            return result;
+        }
+
+        public long? GetFileLength(string filePath, bool fallback)
+        {
+            var appender = GetAppender(filePath);
+            long? result = null;
+            if (appender != null)
+                result = appender.GetFileLength();
+            if (result == null && fallback)
+            {
+                var fileInfo = new FileInfo(filePath);
+                if (fileInfo.Exists)
+                {
+                    return fileInfo.Length;
+                }
+            }
+
+            return result;
+        }
+        
         /// <summary>
         /// Closes the specified appender and removes it from the list. 
         /// </summary>
-        /// <param name="fileName">File name of the appender to be closed.</param>
-        public void InvalidateAppender(string fileName)
+        /// <param name="filePath">File name of the appender to be closed.</param>
+        public void InvalidateAppender(string filePath)
         {
             for (int i = 0; i < appenders.Length; ++i)
             {
@@ -318,7 +381,7 @@ namespace NLog.Internal.FileAppenders
                     break;
                 }
 
-                if (appenders[i].FileName == fileName)
+                if (appenders[i].FileName == filePath)
                 {
                     CloseAppender(appenders[i]);
                     for (int j = i; j < appenders.Length - 1; ++j)

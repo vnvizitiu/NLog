@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2011 Jaroslaw Kowalski <jaak@jkowalski.net>
+// Copyright (c) 2004-2016 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -30,6 +30,8 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF 
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
+
+using NLog.Internal;
 
 namespace NLog.LayoutRenderers
 {
@@ -84,19 +86,11 @@ namespace NLog.LayoutRenderers
         /// <param name="logEvent">Logging event.</param>
         protected override void Append(StringBuilder builder, LogEventInfo logEvent)
         {
-            string outputPath = Environment.GetFolderPath(this.Folder);
+            string basePath = Environment.GetFolderPath(this.Folder);
 
-            if (this.Dir != null)
-            {
-                outputPath = Path.Combine(outputPath, this.Dir);
-            }
-
-            if (this.File != null)
-            {
-                outputPath = Path.Combine(outputPath, this.File);
-            }
+            var path = PathHelpers.CombinePaths(basePath, this.Dir, this.File);
    
-            builder.Append(outputPath);
+            builder.Append(path);
         }
     }
 }

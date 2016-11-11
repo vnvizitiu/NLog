@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2011 Jaroslaw Kowalski <jaak@jkowalski.net>
+// Copyright (c) 2004-2016 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -111,7 +111,8 @@ namespace NLog.LayoutRenderers
         /// <param name="logEvent">Logging event.</param>
         protected override void Append(StringBuilder builder, LogEventInfo logEvent)
         {
-            builder.Append(this.perfCounter.NextValue().ToString(CultureInfo.InvariantCulture));
+            var formatProvider = GetFormatProvider(logEvent);
+            builder.Append(this.perfCounter.NextValue().ToString(formatProvider));
         }
     }
 }

@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2011 Jaroslaw Kowalski <jaak@jkowalski.net>
+// Copyright (c) 2004-2016 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -123,6 +123,11 @@ namespace NLog.UnitTests.Targets.Wrappers
             public MyTarget()
             {
                 this.Events = new List<LogEventInfo>();
+            }
+
+            public MyTarget(string name) : this()
+            {
+                this.Name = name;
             }
 
             public List<LogEventInfo> Events { get; set; }

@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2011 Jaroslaw Kowalski <jaak@jkowalski.net>
+// Copyright (c) 2004-2016 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -141,8 +141,11 @@ namespace NLog
             set
             {
 #if !SILVERLIGHT && !MONO
-                currentAppDomain.DomainUnload -= TurnOffLogging;
-                currentAppDomain.ProcessExit -= TurnOffLogging;
+                if (currentAppDomain != null)
+                {
+                    currentAppDomain.DomainUnload -= TurnOffLogging;
+                    currentAppDomain.ProcessExit -= TurnOffLogging;
+                }
 #endif
                 currentAppDomain = value;
             }
@@ -369,9 +372,12 @@ namespace NLog
         /// </summary>
         public static void Shutdown()
         {
-            foreach (var target in Configuration.AllTargets)
+            if (Configuration != null && Configuration.AllTargets != null)
             {
-                target.Dispose();
+                foreach (var target in Configuration.AllTargets)
+                {
+                    if (target != null) target.Dispose();
+                }
             }
         }
 
@@ -432,7 +438,12 @@ namespace NLog
             // Reset logging configuration to null; this causes old configuration (if any) to be 
             // closed.
             InternalLogger.Info("Shutting down logging...");
-            Configuration = null;
+            if (Configuration != null)
+            {
+                Configuration = null;
+                factory.Dispose();      // Release event listeners
+            }
+            CurrentAppDomain = null;    // No longer part of AppDomains
             InternalLogger.Info("Logger has been shut down.");
         }
     }

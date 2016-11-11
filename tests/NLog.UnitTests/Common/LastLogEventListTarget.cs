@@ -1,5 +1,5 @@
-﻿// 
-// Copyright (c) 2004-2011 Jaroslaw Kowalski <jaak@jkowalski.net>
+// 
+// Copyright (c) 2004-2016 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -44,6 +44,15 @@ namespace NLog.UnitTests.Common
     [Target("LastLogEvent")]
     public class LastLogEventListTarget : TargetWithLayout
     {
+        public LastLogEventListTarget() : base()
+        {
+        }
+
+        public LastLogEventListTarget(string name) : this()
+        {
+            this.Name = name;
+        }
+
         /// <summary>
         /// Increases the number of messages.
         /// </summary>

@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2011 Jaroslaw Kowalski <jaak@jkowalski.net>
+// Copyright (c) 2004-2016 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -47,12 +47,14 @@ namespace NLog.UnitTests.Contexts
             Assert.Equal(string.Empty, GlobalDiagnosticsContext.Get("foo"));
             Assert.False(GlobalDiagnosticsContext.Contains("foo2"));
             Assert.Equal(string.Empty, GlobalDiagnosticsContext.Get("foo2"));
+            Assert.Equal(0, GlobalDiagnosticsContext.GetNames().Count);
 
             GlobalDiagnosticsContext.Set("foo", "bar");
             GlobalDiagnosticsContext.Set("foo2", "bar2");
 
             Assert.True(GlobalDiagnosticsContext.Contains("foo"));
             Assert.Equal("bar", GlobalDiagnosticsContext.Get("foo"));
+            Assert.Equal(2, GlobalDiagnosticsContext.GetNames().Count);
 
             GlobalDiagnosticsContext.Remove("foo");
             Assert.False(GlobalDiagnosticsContext.Contains("foo"));
@@ -60,6 +62,14 @@ namespace NLog.UnitTests.Contexts
 
             Assert.True(GlobalDiagnosticsContext.Contains("foo2"));
             Assert.Equal("bar2", GlobalDiagnosticsContext.Get("foo2"));
+
+            Assert.Equal(1, GlobalDiagnosticsContext.GetNames().Count);
+
+            Assert.Null(GlobalDiagnosticsContext.GetObject("foo3"));
+            Assert.Equal(string.Empty, GlobalDiagnosticsContext.Get("foo3", null));
+
+            GlobalDiagnosticsContext.Set("foo3", new { One = 1 });
+            Assert.NotNull(GlobalDiagnosticsContext.Get("foo3", null));
         }
 
         [Fact]
@@ -83,6 +93,10 @@ namespace NLog.UnitTests.Contexts
 
             Assert.True(GDC.Contains("foo2"));
             Assert.Equal("bar2", GDC.Get("foo2"));
+
+            Assert.Null(GDC.GetObject("foo3"));
+
+            Assert.Equal(string.Empty, GDC.Get("foo3", null));
         }
     }
 }

@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2011 Jaroslaw Kowalski <jaak@jkowalski.net>
+// Copyright (c) 2004-2016 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -67,6 +67,18 @@ namespace NLog.Targets
         {
             this.LastMessage = string.Empty;
             this.Counter = 0;
+        }
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="DebugTarget" /> class.
+        /// </summary>
+        /// <remarks>
+        /// The default value of the layout is: <code>${longdate}|${level:uppercase=true}|${logger}|${message}</code>
+        /// </remarks>
+        /// <param name="name">Name of the target.</param>
+        public DebugTarget(string name) : this()
+        {
+            this.Name = name;
         }
 
         /// <summary>

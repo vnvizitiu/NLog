@@ -1,5 +1,5 @@
-﻿// 
-// Copyright (c) 2004-2011 Jaroslaw Kowalski <jaak@jkowalski.net>
+// 
+// Copyright (c) 2004-2016 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -209,6 +209,19 @@ namespace NLog
             if (this.IsTraceEnabled)
             {
                 this.WriteToTargets(LogLevel.Trace, message, exception);
+            }
+        }
+
+        /// <summary>
+        /// Writes the diagnostic message and exception at the <c>Trace</c> level.
+        /// </summary>
+        /// <param name="message">A <see langword="string" /> to be written.</param>
+        /// <param name="exception">An exception to be logged.</param>
+        public void Trace(Exception exception, [Localizable(false)] string message)
+        {
+            if (this.IsTraceEnabled)
+            {
+                this.WriteToTargets(LogLevel.Trace, exception, message, null);
             }
         }
 
@@ -488,6 +501,19 @@ namespace NLog
         /// </summary>
         /// <param name="message">A <see langword="string" /> to be written.</param>
         /// <param name="exception">An exception to be logged.</param>
+        public void Debug(Exception exception, [Localizable(false)] string message)
+        {
+            if (this.IsDebugEnabled)
+            {
+                this.WriteToTargets(LogLevel.Debug, exception, message, null);
+            }
+        }
+
+        /// <summary>
+        /// Writes the diagnostic message and exception at the <c>Debug</c> level.
+        /// </summary>
+        /// <param name="message">A <see langword="string" /> to be written.</param>
+        /// <param name="exception">An exception to be logged.</param>
         /// <param name="args">Arguments to format.</param>
         public void Debug(Exception exception, [Localizable(false)] string message, params object[] args)
         {
@@ -751,6 +777,19 @@ namespace NLog
             if (this.IsInfoEnabled)
             {
                 this.WriteToTargets(LogLevel.Info, message, exception);
+            }
+        }
+
+        /// <summary>
+        /// Writes the diagnostic message and exception at the <c>Info</c> level.
+        /// </summary>
+        /// <param name="message">A <see langword="string" /> to be written.</param>
+        /// <param name="exception">An exception to be logged.</param>
+        public void Info(Exception exception, [Localizable(false)] string message)
+        {
+            if (this.IsInfoEnabled)
+            {
+                this.WriteToTargets(LogLevel.Info, exception, message, null);
             }
         }
 
@@ -1030,6 +1069,19 @@ namespace NLog
         /// </summary>
         /// <param name="message">A <see langword="string" /> to be written.</param>
         /// <param name="exception">An exception to be logged.</param>
+        public void Warn(Exception exception, [Localizable(false)] string message)
+        {
+            if (this.IsWarnEnabled)
+            {
+                this.WriteToTargets(LogLevel.Warn, exception, message, null);
+            }
+        }
+
+        /// <summary>
+        /// Writes the diagnostic message and exception at the <c>Warn</c> level.
+        /// </summary>
+        /// <param name="message">A <see langword="string" /> to be written.</param>
+        /// <param name="exception">An exception to be logged.</param>
         /// <param name="args">Arguments to format.</param>
         public void Warn(Exception exception, [Localizable(false)] string message, params object[] args)
         {
@@ -1301,6 +1353,19 @@ namespace NLog
         /// </summary>
         /// <param name="message">A <see langword="string" /> to be written.</param>
         /// <param name="exception">An exception to be logged.</param>
+        public void Error(Exception exception, [Localizable(false)] string message)
+        {
+            if (this.IsErrorEnabled)
+            {
+                this.WriteToTargets(LogLevel.Error, exception, message, null);
+            }
+        }
+
+        /// <summary>
+        /// Writes the diagnostic message and exception at the <c>Error</c> level.
+        /// </summary>
+        /// <param name="message">A <see langword="string" /> to be written.</param>
+        /// <param name="exception">An exception to be logged.</param>
         /// <param name="args">Arguments to format.</param>
         public void Error(Exception exception, [Localizable(false)] string message, params object[] args)
         {
@@ -1564,6 +1629,19 @@ namespace NLog
             if (this.IsFatalEnabled)
             {
                 this.WriteToTargets(LogLevel.Fatal, message, exception);
+            }
+        }
+
+        /// <summary>
+        /// Writes the diagnostic message and exception at the <c>Fatal</c> level.
+        /// </summary>
+        /// <param name="message">A <see langword="string" /> to be written.</param>
+        /// <param name="exception">An exception to be logged.</param>
+        public void Fatal(Exception exception, [Localizable(false)] string message)
+        {
+            if (this.IsFatalEnabled)
+            {
+                this.WriteToTargets(LogLevel.Fatal, exception, message, null);
             }
         }
 

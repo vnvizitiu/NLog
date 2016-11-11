@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2011 Jaroslaw Kowalski <jaak@jkowalski.net>
+// Copyright (c) 2004-2016 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -87,7 +87,7 @@ namespace NLog.UnitTests
         [Fact]
         public void Bug5965StackOverflow()
         {
-            LogManager.Configuration = this.CreateConfigurationFromString(@"
+            LogManager.Configuration = CreateConfigurationFromString(@"
 <nlog xmlns='http://www.nlog-project.org/schemas/NLog.xsd'
       xmlns:xsi='http://www.w3.org/2001/XMLSchema-instance'>
   

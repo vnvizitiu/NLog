@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2011 Jaroslaw Kowalski <jaak@jkowalski.net>
+// Copyright (c) 2004-2016 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -190,16 +190,32 @@ namespace NLog.UnitTests.Targets
             {
                 Name = "NoEmptyEventLists_wrapper"
             };
-            asyncTarget.Initialize(configuration);
-            asyncTarget.WriteAsyncLogEvents(new[] { LogEventInfo.Create(LogLevel.Info, "logger1", "message1").WithContinuation(ex => { }) });
-            Thread.Sleep(1000);
-            Assert.Equal(1, target.SendCount);
+            try
+            {
+                asyncTarget.Initialize(configuration);
+                asyncTarget.WriteAsyncLogEvents(new[] { LogEventInfo.Create(LogLevel.Info, "logger1", "message1").WithContinuation(ex => { }) });
+                Thread.Sleep(1000);
+                Assert.Equal(1, target.SendCount);
+            }
+            finally
+            {
+                asyncTarget.Close();
+                target.Close();
+            }
         }
 
         public class MyLogReceiverWebServiceTarget : LogReceiverWebServiceTarget
         {
             public NLogEvents LastPayload;
             public int SendCount;
+
+            public MyLogReceiverWebServiceTarget() : base()
+            {
+            }
+
+            public MyLogReceiverWebServiceTarget(string name) : base(name)
+            {
+            }
 
             protected internal override bool OnSend(NLogEvents events, IEnumerable<AsyncLogEventInfo> asyncContinuations)
             {

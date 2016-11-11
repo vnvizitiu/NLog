@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2011 Jaroslaw Kowalski <jaak@jkowalski.net>
+// Copyright (c) 2004-2016 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -36,8 +36,7 @@ namespace NLog.Targets.Wrappers
     using System.ComponentModel;
     using System.Threading;
     using NLog.Common;
-    using NLog.Internal;
-
+    
     /// <summary>
     /// A target that buffers log events and sends them in batches to the wrapped target.
     /// </summary>
@@ -54,6 +53,17 @@ namespace NLog.Targets.Wrappers
         public BufferingTargetWrapper()
             : this(null)
         {
+        }
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="BufferingTargetWrapper" /> class.
+        /// </summary>
+        /// <param name="name">Name of the target.</param>
+        /// <param name="wrappedTarget">The wrapped target.</param>
+        public BufferingTargetWrapper(string name, Target wrappedTarget)
+            : this(wrappedTarget)
+        {
+            this.Name = name;
         }
 
         /// <summary>
@@ -166,7 +176,8 @@ namespace NLog.Targets.Wrappers
         /// <param name="logEvent">The log event.</param>
         protected override void Write(AsyncLogEventInfo logEvent)
         {
-            this.WrappedTarget.PrecalculateVolatileLayouts(logEvent.LogEvent);
+            this.MergeEventProperties(logEvent.LogEvent);
+            this.PrecalculateVolatileLayouts(logEvent.LogEvent);
 
             int count = this.buffer.Append(logEvent);
             if (count >= this.BufferSize)

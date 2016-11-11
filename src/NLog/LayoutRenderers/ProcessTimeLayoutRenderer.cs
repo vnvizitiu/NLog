@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2011 Jaroslaw Kowalski <jaak@jkowalski.net>
+// Copyright (c) 2004-2016 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -31,6 +31,8 @@
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
 
+using System.Globalization;
+
 namespace NLog.LayoutRenderers
 {
     using System;
@@ -53,40 +55,77 @@ namespace NLog.LayoutRenderers
         protected override void Append(StringBuilder builder, LogEventInfo logEvent)
         {
             TimeSpan ts = logEvent.TimeStamp.ToUniversalTime() - LogEventInfo.ZeroDate;
+            var culture = GetCulture(logEvent);
+            WritetTimestamp(builder, ts, culture);
+        }
+
+        /// <summary>
+        /// Write timestamp to builder with format hh:mm:ss:fff
+        /// </summary>
+        /// <param name="builder"></param>
+        /// <param name="ts"></param>
+        /// <param name="culture"></param>
+        internal static void WritetTimestamp(StringBuilder builder, TimeSpan ts, CultureInfo culture)
+        {
+          
+            string timeSeparator;
+            string ticksSeparator;
+            if (culture != null)
+            {
+#if !SILVERLIGHT
+                timeSeparator = culture.DateTimeFormat.TimeSeparator;
+#else
+                timeSeparator = ":"; 
+#endif
+                ticksSeparator = culture.NumberFormat.NumberDecimalSeparator;
+            }
+            else
+            {
+                timeSeparator = ":";
+                ticksSeparator = ".";
+            }
+
+
             if (ts.Hours < 10)
             {
                 builder.Append('0');
             }
 
             builder.Append(ts.Hours);
-            builder.Append(':');
+            
+            builder.Append(timeSeparator);
             if (ts.Minutes < 10)
             {
                 builder.Append('0');
             }
 
             builder.Append(ts.Minutes);
-            builder.Append(':');
+            builder.Append(timeSeparator);
             if (ts.Seconds < 10)
             {
                 builder.Append('0');
             }
 
             builder.Append(ts.Seconds);
-            builder.Append('.');
-            if (ts.Milliseconds < 1000)
-            {
-                builder.Append('0');
-            }
+          
+            builder.Append(ticksSeparator);
 
             if (ts.Milliseconds < 100)
             {
                 builder.Append('0');
-            }
 
-            if (ts.Milliseconds < 10)
-            {
-                builder.Append('0');
+                if (ts.Milliseconds < 10)
+                {
+                    builder.Append('0');
+
+                    if (ts.Milliseconds < 0)
+                    {
+                        //don't write negative times. This is probably an accuracy problem (accuracy is by default 16ms, see https://github.com/NLog/NLog/wiki/Time-Source)
+                        builder.Append('0');
+                        return;
+                        
+                    }
+                }
             }
 
             builder.Append(ts.Milliseconds);

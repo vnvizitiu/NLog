@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2011 Jaroslaw Kowalski <jaak@jkowalski.net>
+// Copyright (c) 2004-2016 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -31,6 +31,7 @@
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
 
+using System.Linq;
 using NLog.Internal;
 
 namespace NLog
@@ -109,6 +110,18 @@ namespace NLog
                     o = null;
 
                 return o;
+            }
+        }
+
+        /// <summary>
+        /// Returns all item names
+        /// </summary>
+        /// <returns>A collection of the names of all items in the Global Diagnostics Context.</returns>
+        public static ICollection<string> GetNames()
+        {
+            lock (dict)
+            {
+                return dict.Keys;
             }
         }
 

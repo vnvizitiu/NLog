@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2011 Jaroslaw Kowalski <jaak@jkowalski.net>
+// Copyright (c) 2004-2016 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -71,7 +71,7 @@ namespace NLog.Targets
     /// <code lang="C#" source="examples/targets/Configuration API/Database/MSSQL/Example.cs" height="630" />
     /// </example>
     [Target("Database")]
-    public sealed class DatabaseTarget : Target, IInstallable
+    public class DatabaseTarget : Target, IInstallable
     {
         private static Assembly systemDataAssembly = typeof(IDbConnection).Assembly;
 
@@ -90,6 +90,15 @@ namespace NLog.Targets
             this.DBHost = ".";
             this.ConnectionStringsSettings = ConfigurationManager.ConnectionStrings;
             this.CommandType = CommandType.Text;
+        }
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="DatabaseTarget" /> class.
+        /// </summary>
+        /// <param name="name">Name of the target.</param>
+        public DatabaseTarget(string name) : this()
+        {
+            this.Name = name;
         }
 
         /// <summary>
@@ -329,18 +338,24 @@ namespace NLog.Targets
                 }
 
                 this.ConnectionString = SimpleLayout.Escape(cs.ConnectionString);
-                this.ProviderFactory = DbProviderFactories.GetFactory(cs.ProviderName);
-                foundProvider = true;
+                if (!string.IsNullOrEmpty(cs.ProviderName))
+                {
+                    this.ProviderFactory = DbProviderFactories.GetFactory(cs.ProviderName);
+                    foundProvider = true;
+                }
+            
             }
 
             if (!foundProvider)
             {
                 foreach (DataRow row in DbProviderFactories.GetFactoryClasses().Rows)
                 {
-                    if ((string)row["InvariantName"] == this.DBProvider)
+                    var invariantname = (string)row["InvariantName"];
+                    if (invariantname == this.DBProvider)
                     {
                         this.ProviderFactory = DbProviderFactories.GetFactory(this.DBProvider);
                         foundProvider = true;
+                        break;
                     }
                 }
             }
@@ -424,14 +439,16 @@ namespace NLog.Targets
         /// <param name="logEvents">Logging events to be written out.</param>
         protected override void Write(AsyncLogEventInfo[] logEvents)
         {
-            var buckets = SortHelpers.BucketSort(logEvents, c => this.BuildConnectionString(c.LogEvent));
+            var buckets = logEvents.BucketSort(c => this.BuildConnectionString(c.LogEvent));
 
             try
             {
                 foreach (var kvp in buckets)
                 {
-                    foreach (AsyncLogEventInfo ev in kvp.Value)
+                    for (int i = 0; i < kvp.Value.Count; i++)
                     {
+                        AsyncLogEventInfo ev = kvp.Value[i];
+
                         try
                         {
                             this.WriteEventToDatabase(ev.LogEvent);
@@ -521,8 +538,16 @@ namespace NLog.Targets
                 transactionScope.Complete();
             }
         }
-
-        private string BuildConnectionString(LogEventInfo logEvent)
+        /// <summary>
+        /// Build the connectionstring from the properties. 
+        /// </summary>
+        /// <remarks>
+        ///  Using <see cref="ConnectionString"/> at first, and falls back to the properties <see cref="DBHost"/>, 
+        ///  <see cref="DBUserName"/>, <see cref="DBPassword"/> and <see cref="DBDatabase"/>
+        /// </remarks>
+        /// <param name="logEvent">Event to render the layout inside the properties.</param>
+        /// <returns></returns>
+        protected string BuildConnectionString(LogEventInfo logEvent)
         {
             if (this.ConnectionString != null)
             {

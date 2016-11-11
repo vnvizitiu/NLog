@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2011 Jaroslaw Kowalski <jaak@jkowalski.net>
+// Copyright (c) 2004-2016 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -67,6 +67,15 @@ namespace NLog.Targets
         public ChainsawTarget()
         {
             IncludeNLogData = false;
+        }
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="ChainsawTarget"/> class with a name.
+        /// </summary>
+        /// <param name="name">Name of the target.</param>
+        public ChainsawTarget(string name) : this()
+        {
+            this.Name = name;
         }
     }
 }

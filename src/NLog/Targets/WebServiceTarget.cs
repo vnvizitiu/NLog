@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2011 Jaroslaw Kowalski <jaak@jkowalski.net>
+// Copyright (c) 2004-2016 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -87,8 +87,15 @@ namespace NLog.Targets
             const bool writeBOM = false;
             this.Encoding = new UTF8Encoding(writeBOM);
             this.IncludeBOM = writeBOM;
+        }
 
-
+        /// <summary>
+        /// Initializes a new instance of the <see cref="WebServiceTarget" /> class.
+        /// </summary>
+        /// <param name="name">Name of the target</param>
+        public WebServiceTarget(string name) : this()
+        {
+            this.Name = name;
         }
 
         /// <summary>

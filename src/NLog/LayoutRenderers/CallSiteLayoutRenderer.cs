@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2011 Jaroslaw Kowalski <jaak@jkowalski.net>
+// Copyright (c) 2004-2016 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -30,6 +30,8 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF 
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
+
+using System;
 
 namespace NLog.LayoutRenderers
 {
@@ -143,9 +145,9 @@ namespace NLog.LayoutRenderers
                         if (this.CleanNamesOfAnonymousDelegates)
                         {
                             // NLog.UnitTests.LayoutRenderers.CallSiteTests+<>c__DisplayClassa
-                            if (className.Contains("+<>"))
+                            int index = className.IndexOf("+<>", StringComparison.Ordinal);
+                            if (index >= 0)
                             {
-                                int index = className.IndexOf("+<>");
                                 className = className.Substring(0, index);
                             }
                         }

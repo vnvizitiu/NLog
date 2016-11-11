@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2011 Jaroslaw Kowalski <jaak@jkowalski.net>
+// Copyright (c) 2004-2016 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -41,16 +41,23 @@ namespace NLog.UnitTests.LayoutRenderers
 
     public class AssemblyVersionTests : NLogTestBase
     {
+
         [Fact]
-        public void BaseDirTest()
+        public void EntryAssemblyVersionTest()
         {
 #if SILVERLIGHT
 			var assembly = Application.Current.GetType().Assembly;
 #else
-			var assembly = Assembly.GetEntryAssembly();
+            var assembly = Assembly.GetEntryAssembly();
 #endif
-			var assemblyVersion = assembly == null ? "Could not find entry assembly" : assembly.GetName().Version.ToString();
+            var assemblyVersion = assembly == null ? "Could not find entry assembly" : assembly.GetName().Version.ToString();
             AssertLayoutRendererOutput("${assembly-version}", assemblyVersion);
+        }
+
+        [Fact]
+        public void AssemblyNameVersionTest()
+        {
+            AssertLayoutRendererOutput("${assembly-version:NLogAutloadExtension}", "2.0.0.0");
         }
     }
 }

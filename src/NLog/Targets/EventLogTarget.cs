@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2011 Jaroslaw Kowalski <jaak@jkowalski.net>
+// Copyright (c) 2004-2016 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -87,6 +87,15 @@ namespace NLog.Targets
             this.Log = "Application";
             this.MachineName = ".";
             this.MaxMessageLength = 16384;
+        }
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="EventLogTarget"/> class.
+        /// </summary>
+        /// <param name="name">Name of the target.</param>
+        public EventLogTarget(string name) : this(AppDomainWrapper.CurrentDomain)
+        {
+            this.Name = name;
         }
 
         /// <summary>
@@ -340,7 +349,15 @@ namespace NLog.Targets
         /// <returns></returns>
         private EventLog GetEventLog(LogEventInfo logEvent)
         {
-            return eventLogInstance ?? (eventLogInstance = new EventLog(this.Log, this.MachineName, this.Source.Render(logEvent)));
+            var renderedSource = this.Source != null ? this.Source.Render(logEvent) : null;
+            var isCacheUpToDate = eventLogInstance != null && renderedSource == eventLogInstance.Source &&
+                                   eventLogInstance.Log == this.Log && eventLogInstance.MachineName == this.MachineName;
+
+            if (!isCacheUpToDate)
+            {
+                eventLogInstance = new EventLog(this.Log, this.MachineName, renderedSource);
+            }
+            return eventLogInstance;
         }
 
         /// <summary>

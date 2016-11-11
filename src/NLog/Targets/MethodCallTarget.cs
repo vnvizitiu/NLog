@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2011 Jaroslaw Kowalski <jaak@jkowalski.net>
+// Copyright (c) 2004-2016 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -79,6 +79,22 @@ namespace NLog.Targets
         private MethodInfo Method { get; set; }
 
         private int NeededParameters { get; set; }
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="MethodCallTarget" /> class.
+        /// </summary>
+        public MethodCallTarget() : base()
+        {
+        }
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="MethodCallTarget" /> class.
+        /// </summary>
+        /// <param name="name">Name of the target.</param>
+        public MethodCallTarget(string name) : this()
+        {
+            this.Name = name;
+        }
 
         /// <summary>
         /// Initializes the target.

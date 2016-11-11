@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2011 Jaroslaw Kowalski <jaak@jkowalski.net>
+// Copyright (c) 2004-2016 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -68,7 +68,14 @@ namespace NLog.UnitTests.LayoutRenderers
 	        AssertLayoutRendererOutput("${environment:variable=NLOGTEST:default=5678}", "ABC1234");
 	        AssertLayoutRendererOutput("${environment:NLOGTEST:default=5678}", "ABC1234");
         }
-	
+
+        [Fact]
+        public void Environment_empty()
+        {
+            AssertLayoutRendererOutput("${environment}", "");
+            AssertLayoutRendererOutput("${environment:noDefault}", "");
+        }
+
         [Fact]
         public void Environment_WhenVariableIsLayoutAndExists_DoNothing()
         {

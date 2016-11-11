@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2011 Jaroslaw Kowalski <jaak@jkowalski.net>
+// Copyright (c) 2004-2016 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -81,6 +81,18 @@ namespace NLog.Targets
             this.Label = "NLog";
             this.Encoding = Encoding.UTF8;
             this.CheckIfQueueExists = true;
+        }
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="MessageQueueTarget"/> class.
+        /// </summary>
+        /// <remarks>
+        /// The default value of the layout is: <code>${longdate}|${level:uppercase=true}|${logger}|${message}</code>
+        /// </remarks>
+        /// <param name="name">Name of the target.</param>
+        public MessageQueueTarget(string name) : this()
+        {
+            this.Name = name;
         }
 
         /// <summary>

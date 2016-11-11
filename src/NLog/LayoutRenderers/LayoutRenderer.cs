@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2011 Jaroslaw Kowalski <jaak@jkowalski.net>
+// Copyright (c) 2004-2016 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -30,6 +30,8 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF 
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
+
+using System.Globalization;
 
 namespace NLog.LayoutRenderers
 {
@@ -127,9 +129,11 @@ namespace NLog.LayoutRenderers
         /// <param name="configuration">The configuration.</param>
         internal void Initialize(LoggingConfiguration configuration)
         {
+            if (this.LoggingConfiguration == null)
+                this.LoggingConfiguration = configuration;
+
             if (!this.isInitialized)
             {
-                this.LoggingConfiguration = configuration;
                 this.isInitialized = true;
                 this.InitializeLayoutRenderer();
             }
@@ -203,6 +207,53 @@ namespace NLog.LayoutRenderers
             {
                 this.Close();
             }
+        }
+
+        /// <summary>
+        /// Get the <see cref="IFormatProvider"/> for rendering the messages to a <see cref="string"/>
+        /// </summary>
+        /// <param name="logEvent">LogEvent with culture</param>
+        /// <param name="layoutCulture">Culture in on Layout level</param>
+        /// <returns></returns>
+        protected IFormatProvider GetFormatProvider(LogEventInfo logEvent, IFormatProvider layoutCulture = null)
+        {
+            var culture = logEvent.FormatProvider;
+
+            if (culture == null)
+            {
+                culture = layoutCulture;
+            }
+
+            if (culture == null && this.LoggingConfiguration != null)
+            {
+                culture = this.LoggingConfiguration.DefaultCultureInfo;
+            }
+            return culture;
+        }
+
+        /// <summary>
+        /// Get the <see cref="CultureInfo"/> for rendering the messages to a <see cref="string"/>, needed for date and number formats
+        /// </summary>
+        /// <param name="logEvent">LogEvent with culture</param>
+        /// <param name="layoutCulture">Culture in on Layout level</param>
+        /// <returns></returns>
+        /// <remarks>
+        /// <see cref="GetFormatProvider"/> is preferred
+        /// </remarks>
+        protected CultureInfo GetCulture(LogEventInfo logEvent, CultureInfo layoutCulture = null)
+        {
+            var culture = logEvent.FormatProvider as CultureInfo;
+
+            if (culture == null)
+            {
+                culture = layoutCulture;
+            }
+
+            if (culture == null && this.LoggingConfiguration != null)
+            {
+                culture =  this.LoggingConfiguration.DefaultCultureInfo;
+            }
+            return culture;
         }
     }
 }

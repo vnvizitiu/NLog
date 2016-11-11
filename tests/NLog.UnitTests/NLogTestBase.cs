@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2011 Jaroslaw Kowalski <jaak@jkowalski.net>
+// Copyright (c) 2004-2016 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -31,6 +31,7 @@
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
 
+using System.Linq;
 using System.Runtime.CompilerServices;
 
 namespace NLog.UnitTests
@@ -39,9 +40,10 @@ namespace NLog.UnitTests
     using NLog.Common;
     using System.IO;
     using System.Text;
-
+    using System.Globalization;
     using NLog.Layouts;
     using NLog.Config;
+    using NLog.Targets;
     using Xunit;
 #if SILVERLIGHT
     using System.Xml.Linq;
@@ -49,6 +51,9 @@ namespace NLog.UnitTests
     using System.Xml;
     using System.IO.Compression;
     using System.Security.Permissions;
+#if NET3_5 || NET4_0 || NET4_5
+    using Ionic.Zip;
+#endif
 #endif
 
     public abstract class NLogTestBase
@@ -60,10 +65,19 @@ namespace NLog.UnitTests
             {
                 //flush all events if needed.
                 LogManager.Configuration.Close();
+
             }
+
+            if (LogManager.LogFactory != null)
+            {
+                LogManager.LogFactory.ResetCandidateConfigFilePath();
+            }
+
             LogManager.Configuration = null;
             InternalLogger.Reset();
             LogManager.ThrowExceptions = false;
+            LogManager.ThrowConfigExceptions = null;
+
         }
 
         protected void AssertDebugCounter(string targetName, int val)
@@ -135,7 +149,46 @@ namespace NLog.UnitTests
             Assert.Equal(contents, fileText.Substring(fileText.Length - contents.Length));
         }
 
-#if NET4_5
+        protected class CustomFileCompressor : IFileCompressor
+        {
+            public void CompressFile(string fileName, string archiveFileName)
+            {
+#if NET3_5 || NET4_0 || NET4_5
+                using (ZipFile zip = new ZipFile())
+                {
+                    zip.AddFile(fileName);
+                    zip.Save(archiveFileName);
+                }
+#endif
+            }
+        }
+
+#if NET3_5 || NET4_0
+        protected void AssertZipFileContents(string fileName, string contents, Encoding encoding)
+        {
+            if (!File.Exists(fileName))
+                Assert.True(false, "File '" + fileName + "' doesn't exist.");
+
+            byte[] encodedBuf = encoding.GetBytes(contents);
+            
+            using (var zip = new ZipFile(fileName))
+            {
+                Assert.Equal(1, zip.Count);
+                Assert.Equal(encodedBuf.Length, zip[0].UncompressedSize);
+
+                byte[] buf = new byte[zip[0].UncompressedSize];
+                using (var fs = zip[0].OpenReader())
+                {
+                    fs.Read(buf, 0, buf.Length);
+                }
+                                
+                for (int i = 0; i < buf.Length; ++i)
+                {
+                    Assert.Equal(encodedBuf[i], buf[i]);
+                }
+            }
+        }
+#elif NET4_5
         protected void AssertZipFileContents(string fileName, string contents, Encoding encoding)
         {
             FileInfo fi = new FileInfo(fileName);
@@ -161,15 +214,38 @@ namespace NLog.UnitTests
                 }
             }
         }
+#else
+        protected void AssertZipFileContents(string fileName, string contents, Encoding encoding)
+        {
+            Assert.True(false);
+        }
 #endif
 
         protected void AssertFileContents(string fileName, string contents, Encoding encoding)
+        {
+            AssertFileContents(fileName, contents, encoding, false);
+        }
+
+        protected void AssertFileContents(string fileName, string contents, Encoding encoding, bool addBom)
         {
             FileInfo fi = new FileInfo(fileName);
             if (!fi.Exists)
                 Assert.True(false, "File '" + fileName + "' doesn't exist.");
 
             byte[] encodedBuf = encoding.GetBytes(contents);
+
+            //add bom if needed
+            if (addBom)
+            {
+                var preamble = encoding.GetPreamble();
+                if (preamble.Length > 0)
+                {
+                    //insert before
+
+                    encodedBuf = preamble.Concat(encodedBuf).ToArray();
+
+                }
+            }
             Assert.Equal(encodedBuf.Length, fi.Length);
             byte[] buf = new byte[(int)fi.Length];
             using (FileStream fs = new FileStream(fileName, FileMode.Open, FileAccess.Read))
@@ -213,11 +289,24 @@ namespace NLog.UnitTests
             return sb.ToString();
         }
 
-        protected void AssertLayoutRendererOutput(Layout l, string expected)
+        /// <summary>
+        /// Render layout <paramref name="layout"/> with dummy <see cref="LogEventInfo" />and compare result with <paramref name="expected"/>.
+        /// </summary>
+        protected static void AssertLayoutRendererOutput(Layout layout, string expected)
         {
-            l.Initialize(null);
-            string actual = l.Render(LogEventInfo.Create(LogLevel.Info, "loggername", "message"));
-            l.Close();
+            var logEventInfo = LogEventInfo.Create(LogLevel.Info, "loggername", "message");
+
+            AssertLayoutRendererOutput(layout, logEventInfo, expected);
+        }
+
+        /// <summary>
+        /// Render layout <paramref name="layout"/> with <paramref name="logEventInfo"/> and compare result with <paramref name="expected"/>.
+        /// </summary>
+        protected static void AssertLayoutRendererOutput(Layout layout, LogEventInfo logEventInfo, string expected)
+        {
+            layout.Initialize(null);
+            string actual = layout.Render(logEventInfo);
+            layout.Close();
             Assert.Equal(expected, actual);
         }
 
@@ -241,7 +330,7 @@ namespace NLog.UnitTests
 
 #endif
 
-        protected XmlLoggingConfiguration CreateConfigurationFromString(string configXml)
+        protected static XmlLoggingConfiguration CreateConfigurationFromString(string configXml)
         {
 #if SILVERLIGHT
             XElement element = XElement.Parse(configXml);
@@ -263,6 +352,24 @@ namespace NLog.UnitTests
             action();
 
             return stringWriter.ToString();
+        }
+
+        /// <summary>
+        /// Creates <see cref="CultureInfo"/> instance for test purposes
+        /// </summary>
+        /// <param name="cultureName">Culture name to create</param>
+        /// <remarks>
+        /// Creates <see cref="CultureInfo"/> instance with non-userOverride
+        /// flag to provide expected results when running tests in different
+        /// system cultures(with overriden culture options)
+        /// </remarks>
+        protected static CultureInfo GetCultureInfo(string cultureName)
+        {
+#if SILVERLIGHT
+            return new CultureInfo(cultureName);
+#else
+            return new CultureInfo(cultureName, false);
+#endif
         }
 
         public delegate void SyncAction();

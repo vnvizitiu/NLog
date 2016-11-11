@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2011 Jaroslaw Kowalski <jaak@jkowalski.net>
+// Copyright (c) 2004-2016 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -96,7 +96,7 @@ namespace NLog.LayoutRenderers
                 this.Value += this.Increment;
             }
 
-            builder.Append(v.ToString(CultureInfo.InvariantCulture));
+            Internal.StringBuilderExt.AppendInvariant(builder, v);
         }
 
         private static int GetNextSequenceValue(string sequenceName, int defaultValue, int increment)

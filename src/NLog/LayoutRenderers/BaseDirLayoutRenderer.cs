@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2011 Jaroslaw Kowalski <jaak@jkowalski.net>
+// Copyright (c) 2004-2016 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -40,6 +40,7 @@ namespace NLog.LayoutRenderers
     using System.Text;
     using Internal.Fakeables;
     using NLog.Config;
+    using NLog.Internal;
 
     /// <summary>
     /// The current application domain's base directory.
@@ -56,7 +57,7 @@ namespace NLog.LayoutRenderers
         public BaseDirLayoutRenderer() : this(AppDomainWrapper.CurrentDomain)
         {
         }
-        
+
         /// <summary>
         /// Initializes a new instance of the <see cref="BaseDirLayoutRenderer" /> class.
         /// </summary>
@@ -84,19 +85,8 @@ namespace NLog.LayoutRenderers
         /// <param name="logEvent">Logging event.</param>
         protected override void Append(StringBuilder builder, LogEventInfo logEvent)
         {
-            string outputPath = this.baseDir;
-
-            if (this.Dir != null)
-            {
-                outputPath = Path.Combine(outputPath, this.Dir);
-            }
-
-            if (this.File != null)
-            {
-                outputPath = Path.Combine(outputPath, this.File);
-            }
-
-            builder.Append(outputPath);
+            var path = PathHelpers.CombinePaths(baseDir, this.Dir, this.File);
+            builder.Append(path);
         }
     }
 }

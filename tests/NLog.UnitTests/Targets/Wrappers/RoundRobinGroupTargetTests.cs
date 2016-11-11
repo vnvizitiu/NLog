@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2011 Jaroslaw Kowalski <jaak@jkowalski.net>
+// Copyright (c) 2004-2016 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -133,6 +133,15 @@ namespace NLog.UnitTests.Targets.Wrappers
             public int FlushCount { get; private set; }
             public int WriteCount { get; private set; }
 
+            public MyAsyncTarget() : base()
+            {
+            }
+
+            public MyAsyncTarget(string name) : this()
+            {
+                this.Name = name;
+            }
+
             protected override void Write(LogEventInfo logEvent)
             {
                 throw new NotSupportedException();
@@ -173,6 +182,15 @@ namespace NLog.UnitTests.Targets.Wrappers
             public int FlushCount { get; set; }
             public int WriteCount { get; set; }
             public int FailCounter { get; set; }
+
+            public MyTarget() : base()
+            {
+            }
+
+            public MyTarget(string name) : this()
+            {
+                this.Name = name;
+            }
 
             protected override void Write(LogEventInfo logEvent)
             {

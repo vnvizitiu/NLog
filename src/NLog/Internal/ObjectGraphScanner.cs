@@ -1,5 +1,5 @@
-﻿// 
-// Copyright (c) 2004-2011 Jaroslaw Kowalski <jaak@jkowalski.net>
+// 
+// Copyright (c) 2004-2016 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -54,22 +54,22 @@ namespace NLog.Internal
         /// <typeparam name="T">Type of the objects to return.</typeparam>
         /// <param name="rootObjects">The root objects.</param>
         /// <returns>Ordered list of objects implementing T.</returns>
-        public static T[] FindReachableObjects<T>(params object[] rootObjects)
+        public static List<T> FindReachableObjects<T>(params object[] rootObjects)
             where T : class
         {
             InternalLogger.Trace("FindReachableObject<{0}>:", typeof(T));
             var result = new List<T>();
             var visitedObjects = new HashSet<object>();
 
-            var rootObjectsList = rootObjects.ToList();
-            foreach (var rootObject in rootObjectsList)
+            foreach (var rootObject in rootObjects)
             {
                 ScanProperties(result, rootObject, 0, visitedObjects);
             }
 
-            return result.ToArray();
+            return result.ToList();
         }
 
+        /// <remarks>ISet is not there in .net35, so using HashSet</remarks>
         private static void ScanProperties<T>(List<T> result, object o, int level, HashSet<object> visitedObjects)
             where T : class
         {
@@ -78,19 +78,16 @@ namespace NLog.Internal
                 return;
             }
 
-            //cheaper call then getType and isDefined
-            if (visitedObjects.Contains(o))
-            {
-                return;
-            }
-
-
             var type = o.GetType();
             if (!type.IsDefined(typeof(NLogConfigurationItemAttribute), true))
             {
                 return;
             }
 
+            if (visitedObjects.Contains(o))
+            {
+                return;
+            }
 
             visitedObjects.Add(o);
 
@@ -105,8 +102,7 @@ namespace NLog.Internal
                 InternalLogger.Trace("{0}Scanning {1} '{2}'", new string(' ', level), type.Name, o);
             }
 
-            var allReadableProperties = PropertyHelper.GetAllReadableProperties(type).ToList();
-            foreach (PropertyInfo prop in allReadableProperties)
+            foreach (PropertyInfo prop in PropertyHelper.GetAllReadableProperties(type))
             {
                 if (prop.PropertyType.IsPrimitive || prop.PropertyType.IsEnum || prop.PropertyType == typeof(string) || prop.IsDefined(typeof(NLogConfigurationIgnorePropertyAttribute), true))
                 {
@@ -134,30 +130,31 @@ namespace NLog.Internal
                             elements.Add(item);
                         }
                     }
-                    foreach (object element in elements)
-                    {
-                        ScanProperties(result, element, level + 1, visitedObjects);
-                    }
+                    ScanPropertiesList(result, elements, level + 1, visitedObjects);
                 }
                 else
                 {
                     var enumerable = value as IEnumerable;
                     if (enumerable != null)
                     {
-                        //new list to prevent: Collection was modified after the enumerator was instantiated.
+                        //cast to list otherwhise possible:  Collection was modified after the enumerator was instantiated.
+                        var elements = enumerable as IList<object> ?? enumerable.Cast<object>().ToList();
 
-                        var elements = new List<object>(enumerable.Cast<object>());
-
-                        foreach (object element in elements)
-                        {
-                            ScanProperties(result, element, level + 1, visitedObjects);
-                        }
+                        ScanPropertiesList(result, elements, level + 1, visitedObjects);
                     }
                     else
                     {
                         ScanProperties(result, value, level + 1, visitedObjects);
                     }
                 }
+            }
+        }
+
+        private static void ScanPropertiesList<T>(List<T> result, IEnumerable<object> elements, int level, HashSet<object> visitedObjects) where T : class
+        {
+            foreach (object element in elements)
+            {
+                ScanProperties(result, element, level, visitedObjects);
             }
         }
     }

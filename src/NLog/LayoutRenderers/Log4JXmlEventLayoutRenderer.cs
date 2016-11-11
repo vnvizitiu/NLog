@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2011 Jaroslaw Kowalski <jaak@jkowalski.net>
+// Copyright (c) 2004-2016 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -260,11 +260,11 @@ namespace NLog.LayoutRenderers
                 xtw.WriteStartElement("log4j", "properties", dummyNamespace);
                 if (this.IncludeMdc)
                 {
-                    foreach (KeyValuePair<string, object> entry in MappedDiagnosticsContext.ThreadDictionary)
+                    foreach (string key in MappedDiagnosticsContext.GetNames())
                     {
                         xtw.WriteStartElement("log4j", "data", dummyNamespace);
-                        xtw.WriteAttributeSafeString("name", entry.Key);
-                        xtw.WriteAttributeSafeString("value", String.Format(logEvent.FormatProvider, "{0}", entry.Value));
+                        xtw.WriteAttributeSafeString("name", key);
+                        xtw.WriteAttributeSafeString("value", String.Format(logEvent.FormatProvider, "{0}", MappedDiagnosticsContext.GetObject(key)));
                         xtw.WriteEndElement();
                     }
                 }

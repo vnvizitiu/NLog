@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2011 Jaroslaw Kowalski <jaak@jkowalski.net>
+// Copyright (c) 2004-2016 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -118,8 +118,10 @@ namespace NLog.LayoutRenderers
 
                 first = false;
 
-                var key = Convert.ToString(property.Key, CultureInfo.InvariantCulture);
-                var value = Convert.ToString(property.Value, CultureInfo.InvariantCulture);
+                var formatProvider = GetFormatProvider(logEvent);
+
+                var key = Convert.ToString(property.Key, formatProvider);
+                var value = Convert.ToString(property.Value, formatProvider);
                 var pair = Format.Replace("[key]", key)
                                  .Replace("[value]", value);
 

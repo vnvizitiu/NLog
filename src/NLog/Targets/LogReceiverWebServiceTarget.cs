@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2011 Jaroslaw Kowalski <jaak@jkowalski.net>
+// Copyright (c) 2004-2016 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -69,6 +69,15 @@ namespace NLog.Targets
         public LogReceiverWebServiceTarget()
         {
             this.Parameters = new List<MethodCallParameter>();
+        }
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="LogReceiverWebServiceTarget"/> class.
+        /// </summary>
+        /// <param name="name">Name of the target.</param>
+        public LogReceiverWebServiceTarget(string name) : this()
+        {
+            this.Name = name;
         }
 
         /// <summary>
@@ -392,10 +401,17 @@ namespace NLog.Targets
 
         private void ClientOnProcessLogMessagesCompleted(object sender, AsyncCompletedEventArgs asyncCompletedEventArgs)
         {
-            var client = sender as WcfLogReceiverClient;
+            var client = sender as IWcfLogReceiverClient;
             if (client != null && client.State == CommunicationState.Opened)
             {
-                client.CloseCommunicationObject();
+                try
+                {
+                    client.Close();
+                }
+                catch
+                {
+                    client.Abort();
+                }
             }
         }
 #endif

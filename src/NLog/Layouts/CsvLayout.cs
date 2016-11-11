@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2011 Jaroslaw Kowalski <jaak@jkowalski.net>
+// Copyright (c) 2004-2016 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -43,6 +43,7 @@ namespace NLog.Layouts
     /// <summary>
     /// A specialized layout that renders CSV-formatted events.
     /// </summary>
+    /// <remarks>If <see cref="LayoutWithHeaderAndFooter.Header"/> is set, then the header generation with columnnames will be disabled.</remarks>
     [Layout("CsvLayout")]
     [ThreadAgnostic]
     [AppDomainFixedOutput]
@@ -230,6 +231,10 @@ namespace NLog.Layouts
             return logEvent.AddCachedLayoutValue(this, sb.ToString());
         }
 
+        /// <summary>
+        /// Get the headers with the column names.
+        /// </summary>
+        /// <returns></returns>
         private string GetHeader()
         {
             var sb = new StringBuilder();
@@ -295,7 +300,7 @@ namespace NLog.Layouts
         }
 
         /// <summary>
-        /// Header for CSV layout.
+        /// Header with column names for CSV layout.
         /// </summary>
         [ThreadAgnostic]
         private class CsvHeaderLayout : Layout

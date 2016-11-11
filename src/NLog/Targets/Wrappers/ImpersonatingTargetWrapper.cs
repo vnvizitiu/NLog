@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2011 Jaroslaw Kowalski <jaak@jkowalski.net>
+// Copyright (c) 2004-2016 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -60,6 +60,17 @@ namespace NLog.Targets.Wrappers
         public ImpersonatingTargetWrapper()
             : this(null)
         {
+        }
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="ImpersonatingTargetWrapper" /> class.
+        /// </summary>
+        /// <param name="name">Name of the target.</param>
+        /// <param name="wrappedTarget">The wrapped target.</param>
+        public ImpersonatingTargetWrapper(string name, Target wrappedTarget)
+            : this(wrappedTarget)
+        {
+            this.Name = name;
         }
 
         /// <summary>

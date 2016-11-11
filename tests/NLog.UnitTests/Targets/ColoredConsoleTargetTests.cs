@@ -1,5 +1,5 @@
-﻿// 
-// Copyright (c) 2004-2011 Jaroslaw Kowalski <jaak@jkowalski.net>
+// 
+// Copyright (c) 2004-2016 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -160,6 +160,27 @@ namespace NLog.UnitTests.Targets
             AssertOutput(target, "The Cat Sat At The Bar.",
                 new string[] { "The Cat Sat At The Bar." });
         }
+
+#if !NET3_5 && !MONO
+
+        [Fact]
+        public void ColoredConsoleRaceCondtionIgnoreTest()
+        {
+            var configXml = @"
+            <nlog throwExceptions='true'>
+                <targets>
+                  <target name='console' type='coloredConsole' layout='${message}' />
+                  <target name='console2' type='coloredConsole' layout='${message}' />
+                  <target name='console3' type='coloredConsole' layout='${message}' />
+                </targets>
+                <rules>
+                  <logger name='*' minlevel='Trace' writeTo='console,console2,console3' />
+                </rules>
+            </nlog>";
+
+            ConsoleTargetTests.ConsoleRaceCondtionIgnoreInnerTest(configXml);
+        }
+#endif
 
 
         private static void AssertOutput(Target target, string message, string[] expectedParts)

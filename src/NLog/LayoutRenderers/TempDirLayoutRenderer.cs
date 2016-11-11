@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2011 Jaroslaw Kowalski <jaak@jkowalski.net>
+// Copyright (c) 2004-2016 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -37,6 +37,7 @@ namespace NLog.LayoutRenderers
     using System.Text;
 
     using NLog.Config;
+    using NLog.Internal;
 
     /// <summary>
     /// A temporary directory.
@@ -66,20 +67,8 @@ namespace NLog.LayoutRenderers
         /// <param name="logEvent">Logging event.</param>
         protected override void Append(StringBuilder builder, LogEventInfo logEvent)
         {
-            string baseDir = tempDir;
-
-            if (this.File != null)
-            {
-                builder.Append(Path.Combine(baseDir, this.File));
-            }
-            else if (this.Dir != null)
-            {
-                builder.Append(Path.Combine(baseDir, this.Dir));
-            }
-            else
-            {
-                builder.Append(baseDir);
-            }
+            var path = PathHelpers.CombinePaths(tempDir, this.Dir, this.File);
+            builder.Append(path);
         }
     }
 }

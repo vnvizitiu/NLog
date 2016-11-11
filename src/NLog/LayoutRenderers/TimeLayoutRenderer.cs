@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2011 Jaroslaw Kowalski <jaak@jkowalski.net>
+// Copyright (c) 2004-2016 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -30,6 +30,8 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF 
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
+
+using System.Globalization;
 
 namespace NLog.LayoutRenderers
 {
@@ -66,13 +68,32 @@ namespace NLog.LayoutRenderers
             {
                 dt = dt.ToUniversalTime();
             }
+            
+            var culture = GetCulture(logEvent);
+
+            string timeSeparator;
+            string ticksSeparator;
+            if (culture != null)
+            {
+#if !SILVERLIGHT
+                timeSeparator = culture.DateTimeFormat.TimeSeparator;
+#else
+                timeSeparator = ":";
+#endif
+                ticksSeparator = culture.NumberFormat.NumberDecimalSeparator;
+            }
+            else
+            {
+                timeSeparator = ":";
+                ticksSeparator = ".";
+            }
 
             Append2DigitsZeroPadded(builder, dt.Hour);
-            builder.Append(':');
+            builder.Append(timeSeparator);
             Append2DigitsZeroPadded(builder, dt.Minute);
-            builder.Append(':');
+            builder.Append(timeSeparator);
             Append2DigitsZeroPadded(builder, dt.Second);
-            builder.Append('.');
+            builder.Append(ticksSeparator);
             Append4DigitsZeroPadded(builder, (int)(dt.Ticks % 10000000) / 1000);
         }
 

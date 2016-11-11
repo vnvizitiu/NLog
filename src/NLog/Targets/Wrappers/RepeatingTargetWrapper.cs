@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2011 Jaroslaw Kowalski <jaak@jkowalski.net>
+// Copyright (c) 2004-2016 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -65,6 +65,18 @@ namespace NLog.Targets.Wrappers
         public RepeatingTargetWrapper()
             : this(null, 3)
         {
+        }
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="RepeatingTargetWrapper" /> class.
+        /// </summary>
+        /// <param name="name">Name of the target.</param>
+        /// <param name="wrappedTarget">The wrapped target.</param>
+        /// <param name="repeatCount">The repeat count.</param>
+        public RepeatingTargetWrapper(string name, Target wrappedTarget, int repeatCount) 
+            : this(wrappedTarget, repeatCount)
+        {
+            this.Name = name;
         }
 
         /// <summary>

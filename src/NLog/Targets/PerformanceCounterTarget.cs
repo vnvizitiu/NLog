@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2011 Jaroslaw Kowalski <jaak@jkowalski.net>
+// Copyright (c) 2004-2016 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -91,6 +91,15 @@ namespace NLog.Targets
             this.IncrementValue = new SimpleLayout("1");
             this.InstanceName = string.Empty;
             this.CounterHelp = string.Empty;
+        }
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="PerformanceCounterTarget" /> class.
+        /// </summary>
+        /// <param name="name">Name of the target.</param>
+        public PerformanceCounterTarget(string name) : this()
+        {
+            this.Name = name;
         }
 
         /// <summary>

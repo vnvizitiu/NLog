@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2011 Jaroslaw Kowalski <jaak@jkowalski.net>
+// Copyright (c) 2004-2016 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -65,6 +65,20 @@ namespace NLog.Targets.Wrappers
         public AutoFlushTargetWrapper()
             : this(null)
         {
+        }
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="AutoFlushTargetWrapper" /> class.
+        /// </summary>
+        /// <remarks>
+        /// The default value of the layout is: <code>${longdate}|${level:uppercase=true}|${logger}|${message}</code>
+        /// </remarks>
+        /// <param name="wrappedTarget">The wrapped target.</param>
+        /// <param name="name">Name of the target</param>
+        public AutoFlushTargetWrapper(string name, Target wrappedTarget)
+            : this(wrappedTarget)
+        {
+            this.Name = name;
         }
 
         /// <summary>

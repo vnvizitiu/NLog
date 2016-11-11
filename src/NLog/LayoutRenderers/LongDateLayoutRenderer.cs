@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2011 Jaroslaw Kowalski <jaak@jkowalski.net>
+// Copyright (c) 2004-2016 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -66,6 +66,8 @@ namespace NLog.LayoutRenderers
             {
                 dt = dt.ToUniversalTime();
             }
+            
+            //no culture according to specs
 
             Append4DigitsZeroPadded(builder, dt.Year);
             builder.Append('-');

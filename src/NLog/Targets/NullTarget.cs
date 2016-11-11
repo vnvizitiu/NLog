@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2011 Jaroslaw Kowalski <jaak@jkowalski.net>
+// Copyright (c) 2004-2016 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -63,6 +63,28 @@ namespace NLog.Targets
         /// <docgen category='Layout Options' order='10' />
         [DefaultValue(false)]
         public bool FormatMessage { get; set; }
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="NullTarget" /> class.
+        /// </summary>
+        /// <remarks>
+        /// The default value of the layout is: <code>${longdate}|${level:uppercase=true}|${logger}|${message}</code>
+        /// </remarks>
+        public NullTarget() : base()
+        {
+        }
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="NullTarget" /> class.
+        /// </summary>
+        /// <remarks>
+        /// The default value of the layout is: <code>${longdate}|${level:uppercase=true}|${logger}|${message}</code>
+        /// </remarks>
+        /// <param name="name"></param>
+        public NullTarget(string name) : this()
+        {
+            this.Name = name;
+        }
 
         /// <summary>
         /// Does nothing. Optionally it calculates the layout text but

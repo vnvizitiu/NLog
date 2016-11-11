@@ -1,5 +1,5 @@
-﻿// 
-// Copyright (c) 2004-2011 Jaroslaw Kowalski <jaak@jkowalski.net>
+// 
+// Copyright (c) 2004-2016 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -40,6 +40,22 @@ namespace NLog.UnitTests.Targets.Mocks
     [Target("MockWrapper", IsWrapper = true)]
     public class MockTargetWrapper : WrapperTargetBase
     {
+        /// <summary>
+        /// Creates an instance of the <see cref="MockTargetWrapper"/> class.
+        /// </summary>
+        public MockTargetWrapper() : base()
+        {
+        }
+
+        /// <summary>
+        /// Creates an instance of the <see cref="MockTargetWrapper"/> class.
+        /// </summary>
+        /// <param name="name">Name of the target.</param>
+        public MockTargetWrapper(string name) : this()
+        {
+            this.Name = name;
+        }
+
         protected override void CloseTarget()
         {
             base.CloseTarget();

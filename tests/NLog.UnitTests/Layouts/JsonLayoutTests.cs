@@ -1,5 +1,5 @@
-﻿// 
-// Copyright (c) 2004-2011 Jaroslaw Kowalski <jaak@jkowalski.net>
+// 
+// Copyright (c) 2004-2016 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -31,6 +31,8 @@
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
 
+using NLog.Targets;
+
 namespace NLog.UnitTests.Layouts
 {
     using System;
@@ -55,12 +57,14 @@ namespace NLog.UnitTests.Layouts
                     }
             };
 
-            var ev = new LogEventInfo();
-            ev.TimeStamp = new DateTime(2010, 01, 01, 12, 34, 56);
-            ev.Level = LogLevel.Info;
-            ev.Message = "hello, world";
+            var logEventInfo = new LogEventInfo
+            {
+                TimeStamp = new DateTime(2010, 01, 01, 12, 34, 56),
+                Level = LogLevel.Info,
+                Message = "hello, world"
+            };
 
-            Assert.Equal("{ \"date\": \"2010-01-01 12:34:56.0000\", \"level\": \"Info\", \"message\": \"hello, world\" }", jsonLayout.Render(ev));
+            Assert.Equal("{ \"date\": \"2010-01-01 12:34:56.0000\", \"level\": \"Info\", \"message\": \"hello, world\" }", jsonLayout.Render(logEventInfo));
         }
 
         [Fact]
@@ -77,12 +81,14 @@ namespace NLog.UnitTests.Layouts
                 SuppressSpaces = true
             };
 
-            var ev = new LogEventInfo();
-            ev.TimeStamp = new DateTime(2010, 01, 01, 12, 34, 56);
-            ev.Level = LogLevel.Info;
-            ev.Message = "hello, world";
+            var logEventInfo = new LogEventInfo
+            {
+                TimeStamp = new DateTime(2010, 01, 01, 12, 34, 56),
+                Level = LogLevel.Info,
+                Message = "hello, world"
+            };
 
-            Assert.Equal("{\"date\":\"2010-01-01 12:34:56.0000\",\"level\":\"Info\",\"message\":\"hello, world\"}", jsonLayout.Render(ev));
+            Assert.Equal("{\"date\":\"2010-01-01 12:34:56.0000\",\"level\":\"Info\",\"message\":\"hello, world\"}", jsonLayout.Render(logEventInfo));
         }
 
         [Fact]
@@ -98,12 +104,14 @@ namespace NLog.UnitTests.Layouts
                     }
             };
 
-            var ev = new LogEventInfo();
-            ev.TimeStamp = new DateTime(2010, 01, 01, 12, 34, 56);
-            ev.Level = LogLevel.Info;
-            ev.Message = "\"hello, world\"";
+            var logEventInfo = new LogEventInfo
+            {
+                TimeStamp = new DateTime(2010, 01, 01, 12, 34, 56),
+                Level = LogLevel.Info,
+                Message = "\"hello, world\""
+            };
 
-            Assert.Equal("{ \"date\": \"2010-01-01 12:34:56.0000\", \"level\": \"Info\", \"message\": \"\\\"hello, world\\\"\" }", jsonLayout.Render(ev));
+            Assert.Equal("{ \"date\": \"2010-01-01 12:34:56.0000\", \"level\": \"Info\", \"message\": \"\\\"hello, world\\\"\" }", jsonLayout.Render(logEventInfo));
         }
 
         [Fact]
@@ -119,12 +127,14 @@ namespace NLog.UnitTests.Layouts
                     }
             };
 
-            var ev = new LogEventInfo();
-            ev.TimeStamp = new DateTime(2010, 01, 01, 12, 34, 56);
-            ev.Level = LogLevel.Info;
-            ev.Message = "hello,\n\r world";
+            var logEventInfo = new LogEventInfo
+            {
+                TimeStamp = new DateTime(2010, 01, 01, 12, 34, 56),
+                Level = LogLevel.Info,
+                Message = "hello,\n\r world"
+            };
 
-            Assert.Equal("{ \"date\": \"2010-01-01 12:34:56.0000\", \"level\": \"Info\", \"message\": \"hello,\\n\\r world\" }", jsonLayout.Render(ev));
+            Assert.Equal("{ \"date\": \"2010-01-01 12:34:56.0000\", \"level\": \"Info\", \"message\": \"hello,\\n\\r world\" }", jsonLayout.Render(logEventInfo));
         }
 
         [Fact]
@@ -140,12 +150,14 @@ namespace NLog.UnitTests.Layouts
                     }
             };
 
-            var ev = new LogEventInfo();
-            ev.TimeStamp = new DateTime(2010, 01, 01, 12, 34, 56);
-            ev.Level = LogLevel.Info;
-            ev.Message = "{ \"hello\" : \"world\" }";
+            var logEventInfo = new LogEventInfo
+            {
+                TimeStamp = new DateTime(2010, 01, 01, 12, 34, 56),
+                Level = LogLevel.Info,
+                Message = "{ \"hello\" : \"world\" }"
+            };
 
-            Assert.Equal("{ \"date\": \"2010-01-01 12:34:56.0000\", \"level\": \"Info\", \"message\": { \"hello\" : \"world\" } }", jsonLayout.Render(ev));
+            Assert.Equal("{ \"date\": \"2010-01-01 12:34:56.0000\", \"level\": \"Info\", \"message\": { \"hello\" : \"world\" } }", jsonLayout.Render(logEventInfo));
         }
 
         [Fact]
@@ -161,12 +173,169 @@ namespace NLog.UnitTests.Layouts
                     }
             };
 
-            var ev = new LogEventInfo();
-            ev.TimeStamp = new DateTime(2010, 01, 01, 12, 34, 56);
-            ev.Level = LogLevel.Info;
-            ev.Message = "{ \"hello\" : \"world\" }";
+            var logEventInfo = new LogEventInfo
+            {
+                TimeStamp = new DateTime(2010, 01, 01, 12, 34, 56),
+                Level = LogLevel.Info,
+                Message = "{ \"hello\" : \"world\" }"
+            };
 
-            Assert.Equal("{ \"date\": \"2010-01-01 12:34:56.0000\", \"level\": \"Info\", \"message\": \"{ \\\"hello\\\" : \\\"world\\\" }\" }", jsonLayout.Render(ev));
+            Assert.Equal("{ \"date\": \"2010-01-01 12:34:56.0000\", \"level\": \"Info\", \"message\": \"{ \\\"hello\\\" : \\\"world\\\" }\" }", jsonLayout.Render(logEventInfo));
+        }
+
+        [Fact]
+        public void NestedJsonAttrTest()
+        {
+            var jsonLayout = new JsonLayout
+            {
+                Attributes =
+                {
+                    new JsonAttribute("type", "${exception:format=Type}"),
+                    new JsonAttribute("message", "${exception:format=Message}"),
+                    new JsonAttribute("innerException", new JsonLayout
+                    {
+
+                        Attributes =
+                        {
+                            new JsonAttribute("type", "${exception:format=:innerFormat=Type:MaxInnerExceptionLevel=1:InnerExceptionSeparator=}"),
+                            new JsonAttribute("message", "${exception:format=:innerFormat=Message:MaxInnerExceptionLevel=1:InnerExceptionSeparator=}"),
+                        }
+                    },
+                    //don't escape layout
+                    false)
+                }
+            };
+
+            var logEventInfo = new LogEventInfo
+            {
+                Exception = new NLogRuntimeException("test", new NullReferenceException("null is bad!"))
+            };
+
+            var json = jsonLayout.Render(logEventInfo);
+            Assert.Equal("{ \"type\": \"NLog.NLogRuntimeException\", \"message\": \"test\", \"innerException\": { \"type\": \"System.NullReferenceException\", \"message\": \"null is bad!\" } }", json);
+
+        }
+
+        [Fact]
+        public void NestedJsonAttrDoesNotRenderEmptyLiteralIfRenderEmptyObjectIsFalseTest()
+        {
+            var jsonLayout = new JsonLayout
+            {
+                Attributes =
+                {
+                    new JsonAttribute("type", "${exception:format=Type}"),
+                    new JsonAttribute("message", "${exception:format=Message}"),
+                    new JsonAttribute("innerException", new JsonLayout
+                    {
+
+                        Attributes =
+                        {
+                            new JsonAttribute("type", "${exception:format=:innerFormat=Type:MaxInnerExceptionLevel=1:InnerExceptionSeparator=}"),
+                            new JsonAttribute("message", "${exception:format=:innerFormat=Message:MaxInnerExceptionLevel=1:InnerExceptionSeparator=}"),
+                        },
+                        RenderEmptyObject = false
+                    },
+                    //don't escape layout
+                    false)
+                }
+            };
+
+            var logEventInfo = new LogEventInfo
+            {
+                Exception = new NLogRuntimeException("test", (Exception)null)
+            };
+
+            var json = jsonLayout.Render(logEventInfo);
+            Assert.Equal("{ \"type\": \"NLog.NLogRuntimeException\", \"message\": \"test\" }", json);
+
+        }
+
+        [Fact]
+        public void NestedJsonAttrRendersEmptyLiteralIfRenderEmptyObjectIsTrueTest()
+        {
+            var jsonLayout = new JsonLayout
+            {
+                Attributes =
+                {
+                    new JsonAttribute("type", "${exception:format=Type}"),
+                    new JsonAttribute("message", "${exception:format=Message}"),
+                    new JsonAttribute("innerException", new JsonLayout
+                    {
+
+                        Attributes =
+                        {
+                            new JsonAttribute("type", "${exception:format=:innerFormat=Type:MaxInnerExceptionLevel=1:InnerExceptionSeparator=}"),
+                            new JsonAttribute("message", "${exception:format=:innerFormat=Message:MaxInnerExceptionLevel=1:InnerExceptionSeparator=}"),
+                        },
+                        RenderEmptyObject = true
+                    },
+                    //don't escape layout
+                    false)
+                }
+            };
+
+            var logEventInfo = new LogEventInfo
+            {
+                Exception = new NLogRuntimeException("test", (Exception)null)
+            };
+
+            var json = jsonLayout.Render(logEventInfo);
+            Assert.Equal("{ \"type\": \"NLog.NLogRuntimeException\", \"message\": \"test\", \"innerException\": {  } }", json);
+
+        }
+
+        [Fact]
+        public void NestedJsonAttrTestFromXML()
+        {
+            var configXml = @"
+<nlog>
+  <targets>
+    <target name='jsonFile' type='File' fileName='log.json'>
+      <layout type='JsonLayout'>
+        <attribute name='time' layout='${longdate}' />
+        <attribute name='level' layout='${level:upperCase=true}'/>
+        <attribute name='nested' encode='false'  >
+          <layout type='JsonLayout'>
+            <attribute name='message' layout='${message}' />
+            <attribute name='exception' layout='${exception}' />
+          </layout>
+        </attribute>
+      </layout>
+    </target>
+  </targets>
+  <rules>
+  </rules>
+</nlog>
+";
+
+            var config = CreateConfigurationFromString(configXml);
+
+            Assert.NotNull(config);
+            var target = config.FindTargetByName<FileTarget>("jsonFile");
+            Assert.NotNull(target);
+            var jsonLayout = target.Layout as JsonLayout;
+            Assert.NotNull(jsonLayout);
+            var attrs = jsonLayout.Attributes;
+            Assert.NotNull(attrs);
+            Assert.Equal(3, attrs.Count);
+            Assert.Equal(typeof(SimpleLayout), attrs[0].Layout.GetType());
+            Assert.Equal(typeof(SimpleLayout), attrs[1].Layout.GetType());
+            Assert.Equal(typeof(JsonLayout), attrs[2].Layout.GetType());
+            var nestedJsonLayout = (JsonLayout)attrs[2].Layout;
+            Assert.Equal(2, nestedJsonLayout.Attributes.Count);
+            Assert.Equal("'${message}'", nestedJsonLayout.Attributes[0].Layout.ToString());
+            Assert.Equal("'${exception}'", nestedJsonLayout.Attributes[1].Layout.ToString());
+
+            var logEventInfo = new LogEventInfo
+            {
+                TimeStamp = new DateTime(2016, 10, 30, 13, 30, 55),
+                Message = "this is message",
+                Level = LogLevel.Info,
+                Exception = new NLogRuntimeException("test", new NullReferenceException("null is bad!"))
+            };
+
+            var json = jsonLayout.Render(logEventInfo);
+            Assert.Equal("{ \"time\": \"2016-10-30 13:30:55.0000\", \"level\": \"INFO\", \"nested\": { \"message\": \"this is message\", \"exception\": \"test\" } }", json);
         }
     }
 }

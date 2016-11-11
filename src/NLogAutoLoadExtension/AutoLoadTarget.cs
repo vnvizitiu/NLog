@@ -1,5 +1,5 @@
-﻿// 
-// Copyright (c) 2004-2011 Jaroslaw Kowalski <jaak@jkowalski.net>
+// 
+// Copyright (c) 2004-2016 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -39,6 +39,15 @@ namespace NLogAutloadExtension
     [Target("AutoLoadTarget")]
     public class AutoLoadTarget : Target
     {
+        public AutoLoadTarget() : base()
+        {
+        }
+
+        public AutoLoadTarget(string name) : this()
+        {
+            this.Name = name;
+        }
+
         protected override void Write(LogEventInfo logEvent)
         {
             // do nothing

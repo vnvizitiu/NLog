@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2011 Jaroslaw Kowalski <jaak@jkowalski.net>
+// Copyright (c) 2004-2016 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -431,7 +431,7 @@ namespace NLog
         {
             lock (this.layoutCacheLock)
             {
-                if (this.layoutCache == null)
+                if (this.layoutCache == null || this.layoutCache.Count == 0)
                 {
                     value = null;
                     return false;

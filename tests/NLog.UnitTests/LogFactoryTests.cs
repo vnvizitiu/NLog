@@ -1,5 +1,5 @@
-﻿// 
-// Copyright (c) 2004-2011 Jaroslaw Kowalski <jaak@jkowalski.net>
+// 
+// Copyright (c) 2004-2016 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -63,25 +63,17 @@ namespace NLog.UnitTests
         [Fact]
         public void InvalidXMLConfiguration_DoesNotThrowErrorWhen_ThrowExceptionFlagIsNotSet()
         {
-            Boolean ExceptionThrown = false;
-            try
-            {
-                LogManager.ThrowExceptions = false;
 
-                LogManager.Configuration = CreateConfigurationFromString(@"
+            LogManager.ThrowExceptions = false;
+
+            LogManager.Configuration = CreateConfigurationFromString(@"
             <nlog internalLogToConsole='IamNotBooleanValue'>
                 <targets><target type='MethodCall' name='test' methodName='Throws' className='NLog.UnitTests.LogFactoryTests, NLog.UnitTests.netfx40' /></targets>
                 <rules>
                     <logger name='*' minlevel='Debug' writeto='test'></logger>
                 </rules>
             </nlog>");
-            }
-            catch (Exception)
-            {
-                ExceptionThrown = true;
-            }
 
-            Assert.False(ExceptionThrown);
 
         }
 
@@ -234,7 +226,32 @@ namespace NLog.UnitTests
                 </rules>
             </nlog>");
         }
-        
+
+        [Fact]
+        public void ValueWithVariableMustNotCauseInfiniteRecursion()
+        {
+            LogManager.Configuration = null;
+
+            File.WriteAllText("NLog.config", @"
+            <nlog>
+                <variable name='dir' value='c:\mylogs' />
+                <targets>
+                    <target name='f' type='file' fileName='${var:dir}\test.log' />
+                </targets>
+                <rules>
+                    <logger name='*' writeTo='f' />
+                </rules>
+            </nlog>");
+            try
+            {
+                LogManager.Configuration.ToString();
+            }
+            finally
+            {
+                File.Delete("NLog.config");
+            }
+        }
+
         [Fact]
         public void EnableAndDisableLogging()
         {

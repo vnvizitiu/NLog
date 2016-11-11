@@ -1,5 +1,5 @@
 // 
-// Copyright (c) 2004-2011 Jaroslaw Kowalski <jaak@jkowalski.net>
+// Copyright (c) 2004-2016 Jaroslaw Kowalski <jaak@jkowalski.net>, Kim Christensen, Julian Verdurmen
 // 
 // All rights reserved.
 // 
@@ -80,6 +80,18 @@ namespace NLog.Targets
             this.Parameters = new List<NLogViewerParameterInfo>();
             this.Renderer.Parameters = this.Parameters;
             NewLine = false;
+        }
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="NLogViewerTarget" /> class.
+        /// </summary>
+        /// <remarks>
+        /// The default value of the layout is: <code>${longdate}|${level:uppercase=true}|${logger}|${message}</code>
+        /// </remarks>
+        /// <param name="name">Name of the target.</param>
+        public NLogViewerTarget(string name) : this()
+        {
+            this.Name = name;
         }
 
         /// <summary>
