@@ -90,6 +90,7 @@ namespace NLog.Targets
             this.DBHost = ".";
             this.ConnectionStringsSettings = ConfigurationManager.ConnectionStrings;
             this.CommandType = CommandType.Text;
+            this.OptimizeBufferReuse = GetType() == typeof(DatabaseTarget);
         }
 
         /// <summary>
@@ -185,7 +186,7 @@ namespace NLog.Targets
         /// This option was removed in NLog 4.0 because the logging code always runs outside of transaction. 
         /// This ensures that the log gets written to the database if you rollback the main transaction because of an error and want to log the error.
         /// </remarks>
-        [Obsolete("Obsolete - value will be ignored - logging code always runs outside of transaction. Will be removed in NLog 6.")]
+        [Obsolete("Value will be ignored as logging code always executes outside of a transaction. Marked obsolete on NLog 4.0 and it will be removed in NLog 6.")]
         public bool? UseTransactions { get; set; }
 
         /// <summary>
@@ -323,7 +324,7 @@ namespace NLog.Targets
             if (UseTransactions.HasValue)
 #pragma warning restore 618
             {
-                InternalLogger.Warn("UseTransactions is obsolete and will not be used - will be removed in NLog 6");
+                InternalLogger.Warn("UseTransactions property is obsolete and will not be used - will be removed in NLog 6");
             }
 
             bool foundProvider = false;
@@ -362,27 +363,35 @@ namespace NLog.Targets
 
             if (!foundProvider)
             {
-                switch (this.DBProvider.ToUpper(CultureInfo.InvariantCulture))
-                {
-                    case "SQLSERVER":
-                    case "MSSQL":
-                    case "MICROSOFT":
-                    case "MSDE":
-                        this.ConnectionType = systemDataAssembly.GetType("System.Data.SqlClient.SqlConnection", true);
-                        break;
+                this.SetConnectionType();
+            }
+        }
 
-                    case "OLEDB":
-                        this.ConnectionType = systemDataAssembly.GetType("System.Data.OleDb.OleDbConnection", true);
-                        break;
+        /// <summary>
+        /// Set the <see cref="ConnectionType"/> to use it for opening connections to the database.
+        /// </summary>
+        private void SetConnectionType()
+        {
+            switch (this.DBProvider.ToUpper(CultureInfo.InvariantCulture))
+            {
+                case "SQLSERVER":
+                case "MSSQL":
+                case "MICROSOFT":
+                case "MSDE":
+                    this.ConnectionType = systemDataAssembly.GetType("System.Data.SqlClient.SqlConnection", true);
+                    break;
 
-                    case "ODBC":
-                        this.ConnectionType = systemDataAssembly.GetType("System.Data.Odbc.OdbcConnection", true);
-                        break;
+                case "OLEDB":
+                    this.ConnectionType = systemDataAssembly.GetType("System.Data.OleDb.OleDbConnection", true);
+                    break;
 
-                    default:
-                        this.ConnectionType = Type.GetType(this.DBProvider, true);
-                        break;
-                }
+                case "ODBC":
+                    this.ConnectionType = systemDataAssembly.GetType("System.Data.Odbc.OdbcConnection", true);
+                    break;
+
+                default:
+                    this.ConnectionType = Type.GetType(this.DBProvider, true);
+                    break;
             }
         }
 
@@ -432,12 +441,26 @@ namespace NLog.Targets
         }
 
         /// <summary>
+        /// NOTE! Obsolete, instead override Write(IList{AsyncLogEventInfo} logEvents)
+        /// 
         /// Writes an array of logging events to the log target. By default it iterates on all
         /// events and passes them to "Write" method. Inheriting classes can use this method to
         /// optimize batch writes.
         /// </summary>
         /// <param name="logEvents">Logging events to be written out.</param>
+        [Obsolete("Instead override Write(IList<AsyncLogEventInfo> logEvents. Marked obsolete on NLog 4.5")]
         protected override void Write(AsyncLogEventInfo[] logEvents)
+        {
+            Write((IList<AsyncLogEventInfo>)logEvents);
+        }
+
+        /// <summary>
+        /// Writes an array of logging events to the log target. By default it iterates on all
+        /// events and passes them to "Write" method. Inheriting classes can use this method to
+        /// optimize batch writes.
+        /// </summary>
+        /// <param name="logEvents">Logging events to be written out.</param>
+        protected override void Write(IList<AsyncLogEventInfo> logEvents)
         {
             var buckets = logEvents.BucketSort(c => this.BuildConnectionString(c.LogEvent));
 
@@ -493,46 +516,48 @@ namespace NLog.Targets
             {
                 this.EnsureConnectionOpen(this.BuildConnectionString(logEvent));
 
-                IDbCommand command = this.activeConnection.CreateCommand();
-                command.CommandText = this.CommandText.Render(logEvent);
-                command.CommandType = this.CommandType;
-
-                InternalLogger.Trace("Executing {0}: {1}", command.CommandType, command.CommandText);
-
-                foreach (DatabaseParameterInfo par in this.Parameters)
+                using (IDbCommand command = this.activeConnection.CreateCommand())
                 {
-                    IDbDataParameter p = command.CreateParameter();
-                    p.Direction = ParameterDirection.Input;
-                    if (par.Name != null)
+                    command.CommandText = base.RenderLogEvent(this.CommandText, logEvent);
+                    command.CommandType = this.CommandType;
+
+                    InternalLogger.Trace("Executing {0}: {1}", command.CommandType, command.CommandText);
+
+                    foreach (DatabaseParameterInfo par in this.Parameters)
                     {
-                        p.ParameterName = par.Name;
+                        IDbDataParameter p = command.CreateParameter();
+                        p.Direction = ParameterDirection.Input;
+                        if (par.Name != null)
+                        {
+                            p.ParameterName = par.Name;
+                        }
+
+                        if (par.Size != 0)
+                        {
+                            p.Size = par.Size;
+                        }
+
+                        if (par.Precision != 0)
+                        {
+                            p.Precision = par.Precision;
+                        }
+
+                        if (par.Scale != 0)
+                        {
+                            p.Scale = par.Scale;
+                        }
+
+                        string stringValue = base.RenderLogEvent(par.Layout, logEvent);
+
+                        p.Value = stringValue;
+                        command.Parameters.Add(p);
+
+                        InternalLogger.Trace("  Parameter: '{0}' = '{1}' ({2})", p.ParameterName, p.Value, p.DbType);
                     }
 
-                    if (par.Size != 0)
-                    {
-                        p.Size = par.Size;
-                    }
-
-                    if (par.Precision != 0)
-                    {
-                        p.Precision = par.Precision;
-                    }
-
-                    if (par.Scale != 0)
-                    {
-                        p.Scale = par.Scale;
-                    }
-
-                    string stringValue = par.Layout.Render(logEvent);
-
-                    p.Value = stringValue;
-                    command.Parameters.Add(p);
-
-                    InternalLogger.Trace("  Parameter: '{0}' = '{1}' ({2})", p.ParameterName, p.Value, p.DbType);
+                    int result = command.ExecuteNonQuery();
+                    InternalLogger.Trace("Finished execution, result = {0}", result);
                 }
-
-                int result = command.ExecuteNonQuery();
-                InternalLogger.Trace("Finished execution, result = {0}", result);
 
                 //not really needed as there is no transaction at all.
                 transactionScope.Complete();
@@ -551,13 +576,13 @@ namespace NLog.Targets
         {
             if (this.ConnectionString != null)
             {
-                return this.ConnectionString.Render(logEvent);
+                return base.RenderLogEvent(this.ConnectionString, logEvent);
             }
 
             var sb = new StringBuilder();
 
             sb.Append("Server=");
-            sb.Append(this.DBHost.Render(logEvent));
+            sb.Append(base.RenderLogEvent(this.DBHost, logEvent));
             sb.Append(";");
             if (this.DBUserName == null)
             {
@@ -566,16 +591,16 @@ namespace NLog.Targets
             else
             {
                 sb.Append("User id=");
-                sb.Append(this.DBUserName.Render(logEvent));
+                sb.Append(base.RenderLogEvent(this.DBUserName, logEvent));
                 sb.Append(";Password=");
-                sb.Append(this.DBPassword.Render(logEvent));
+                sb.Append(base.RenderLogEvent(this.DBPassword, logEvent));
                 sb.Append(";");
             }
 
             if (this.DBDatabase != null)
             {
                 sb.Append("Database=");
-                sb.Append(this.DBDatabase.Render(logEvent));
+                sb.Append(base.RenderLogEvent(this.DBDatabase, logEvent));
             }
 
             return sb.ToString();
@@ -628,12 +653,12 @@ namespace NLog.Targets
                     if (commandInfo.ConnectionString != null)
                     {
                         // if there is connection string specified on the command info, use it
-                        cs = commandInfo.ConnectionString.Render(logEvent);
+                        cs = base.RenderLogEvent(commandInfo.ConnectionString, logEvent);
                     }
                     else if (this.InstallConnectionString != null)
                     {
                         // next, try InstallConnectionString
-                        cs = this.InstallConnectionString.Render(logEvent);
+                        cs = base.RenderLogEvent(this.InstallConnectionString, logEvent);
                     }
                     else
                     {
@@ -641,35 +666,41 @@ namespace NLog.Targets
                         cs = this.BuildConnectionString(logEvent);
                     }
 
+                    // Set ConnectionType if it has not been initialized already
+                    if (this.ConnectionType == null)
+                    {
+                        this.SetConnectionType();
+                    }
+
                     this.EnsureConnectionOpen(cs);
 
-                    var command = this.activeConnection.CreateCommand();
-                    command.CommandType = commandInfo.CommandType;
-                    command.CommandText = commandInfo.Text.Render(logEvent);
-
-                    try
+                    using (var command = this.activeConnection.CreateCommand())
                     {
-                        installationContext.Trace("Executing {0} '{1}'", command.CommandType, command.CommandText);
-                        command.ExecuteNonQuery();
-                    }
-                    catch (Exception exception)
-                    {
-                        if (exception.MustBeRethrownImmediately())
-                        {
-                            throw;
-                        }
+                        command.CommandType = commandInfo.CommandType;
+                        command.CommandText = base.RenderLogEvent(commandInfo.Text, logEvent);
 
-                        if (commandInfo.IgnoreFailures || installationContext.IgnoreFailures)
+                        try
                         {
-                            installationContext.Warning(exception.Message);
+                            installationContext.Trace("Executing {0} '{1}'", command.CommandType, command.CommandText);
+                            command.ExecuteNonQuery();
                         }
-                        else
+                        catch (Exception exception)
                         {
-                            installationContext.Error(exception.Message);
-                            throw;
-                        }
+                            if (exception.MustBeRethrownImmediately())
+                            {
+                                throw;
+                            }
 
-                      
+                            if (commandInfo.IgnoreFailures || installationContext.IgnoreFailures)
+                            {
+                                installationContext.Warning(exception.Message);
+                            }
+                            else
+                            {
+                                installationContext.Error(exception.Message);
+                                throw;
+                            }
+                        }
                     }
                 }
             }

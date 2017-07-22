@@ -74,7 +74,7 @@ namespace NLog.Targets
         /// Initializes a new instance of the <see cref="EventLogTarget"/> class.
         /// </summary>
         public EventLogTarget()
-            : this(AppDomainWrapper.CurrentDomain)
+            : this(LogFactory.CurrentAppDomain)
         {
         }
 
@@ -87,13 +87,15 @@ namespace NLog.Targets
             this.Log = "Application";
             this.MachineName = ".";
             this.MaxMessageLength = 16384;
+            this.OptimizeBufferReuse = GetType() == typeof(EventLogTarget);
         }
 
         /// <summary>
         /// Initializes a new instance of the <see cref="EventLogTarget"/> class.
         /// </summary>
         /// <param name="name">Name of the target.</param>
-        public EventLogTarget(string name) : this(AppDomainWrapper.CurrentDomain)
+        public EventLogTarget(string name) 
+            : this(LogFactory.CurrentAppDomain)
         {
             this.Name = name;
         }
@@ -140,6 +142,7 @@ namespace NLog.Targets
         public string Log { get; set; }
 
         private int maxMessageLength;
+        
         /// <summary>
         /// Gets or sets the message length limit to write to the Event Log.
         /// </summary>
@@ -154,6 +157,29 @@ namespace NLog.Targets
                     throw new ArgumentException("MaxMessageLength cannot be zero or negative.");
 
                 this.maxMessageLength = value;
+            }
+        }
+
+              
+        private long? maxKilobytes;
+
+        /// <summary>
+        /// Gets or sets the maximum Event log size in kilobytes.
+        /// 
+        /// If <c>null</c>, the value won't be set. 
+        /// 
+        /// Default is 512 Kilobytes as specified by Eventlog API
+        /// </summary>
+        /// <remarks><value>MaxKilobytes</value> cannot be less than 64 or greater than 4194240 or not a multiple of 64. If <c>null</c>, use the default value</remarks>
+        [DefaultValue(null)]
+        public long? MaxKilobytes
+        {
+            get { return this.maxKilobytes; }
+            set
+            {   //Event log API restriction
+                if (value != null && (value < 64 || value > 4194240 || (value % 64 != 0)))
+                    throw new ArgumentException("MaxKilobytes must be a multitude of 64, and between 64 and 4194240");
+                this.maxKilobytes = value;
             }
         }
 
@@ -242,23 +268,13 @@ namespace NLog.Targets
         /// <param name="logEvent">The logging event.</param>
         protected override void Write(LogEventInfo logEvent)
         {
-            string message = this.Layout.Render(logEvent);
+            string message = base.RenderLogEvent(this.Layout, logEvent);
 
             EventLogEntryType entryType = GetEntryType(logEvent);
 
-            int eventId = 0;
+            int eventId = this.EventId.RenderInt(logEvent, 0, "EventLogTarget.EventId");
 
-            if (this.EventId != null)
-            {
-                eventId = Convert.ToInt32(this.EventId.Render(logEvent), CultureInfo.InvariantCulture);
-            }
-
-            short category = 0;
-
-            if (this.Category != null)
-            {
-                category = Convert.ToInt16(this.Category.Render(logEvent), CultureInfo.InvariantCulture);
-            }
+            short category = this.Category.RenderShort(logEvent, 0, "EventLogTarget.Category");
 
             EventLog eventLog = GetEventLog(logEvent);
 
@@ -301,7 +317,7 @@ namespace NLog.Targets
             {
                 //try parse, if fail,  determine auto
 
-                var value = this.EntryType.Render(logEvent);
+                var value = base.RenderLogEvent(this.EntryType, logEvent);
 
                 EventLogEntryType eventLogEntryType;
                 if (EnumHelpers.TryParse(value, true, out eventLogEntryType))
@@ -349,13 +365,18 @@ namespace NLog.Targets
         /// <returns></returns>
         private EventLog GetEventLog(LogEventInfo logEvent)
         {
-            var renderedSource = this.Source != null ? this.Source.Render(logEvent) : null;
+            var renderedSource = this.Source != null ? base.RenderLogEvent(this.Source, logEvent) : null;
             var isCacheUpToDate = eventLogInstance != null && renderedSource == eventLogInstance.Source &&
                                    eventLogInstance.Log == this.Log && eventLogInstance.MachineName == this.MachineName;
 
             if (!isCacheUpToDate)
             {
                 eventLogInstance = new EventLog(this.Log, this.MachineName, renderedSource);
+            }
+            if (this.MaxKilobytes.HasValue)
+            {
+                //you need more permissions to set, so don't set by default
+                eventLogInstance.MaximumKilobytes = this.MaxKilobytes.Value;
             }
             return eventLogInstance;
         }

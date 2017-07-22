@@ -31,6 +31,12 @@
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
 
+using System;
+using System.Text.RegularExpressions;
+using NLog.Common;
+using NLog.Config;
+using Xunit.Extensions;
+
 namespace NLog.UnitTests.Config
 {
     using System.IO;
@@ -43,12 +49,8 @@ namespace NLog.UnitTests.Config
     public class ExtensionTests : NLogTestBase
     {
         private string extensionAssemblyName1 = "SampleExtensions";
-#if SILVERLIGHT
-        private string extensionAssemblyFullPath1 = "SampleExtensions.dll";
-#else
         private string extensionAssemblyFullPath1 = Path.GetFullPath("SampleExtensions.dll");
-#endif
-        
+
         [Fact]
         public void ExtensionTest1()
         {
@@ -80,7 +82,7 @@ namespace NLog.UnitTests.Config
 
             Target myTarget = configuration.FindTargetByName("t");
             Assert.Equal("MyExtensionNamespace.MyTarget", myTarget.GetType().FullName);
-            
+
             var d1Target = (DebugTarget)configuration.FindTargetByName("d1");
             var layout = d1Target.Layout as SimpleLayout;
             Assert.NotNull(layout);
@@ -289,7 +291,7 @@ namespace NLog.UnitTests.Config
                 <add type='some_type_that_doesnt_exist'/>
 </extensions>
 </nlog>";
-            Assert.Throws<NLogConfigurationException>(()=>CreateConfigurationFromString(configXml));
+            Assert.Throws<NLogConfigurationException>(() => CreateConfigurationFromString(configXml));
         }
 
         [Fact]
@@ -368,11 +370,14 @@ namespace NLog.UnitTests.Config
             Assert.NotNull(d1Target);
         }
 
-#if !SILVERLIGHT
         [Fact]
         public void Extension_should_be_auto_loaded_when_following_NLog_dll_format()
         {
-            var configuration = CreateConfigurationFromString(@"
+            try
+            {
+
+
+                var configuration = CreateConfigurationFromString(@"
 <nlog throwExceptions='true'>
     <targets>
         <target name='t' type='AutoLoadTarget' />
@@ -384,9 +389,104 @@ namespace NLog.UnitTests.Config
     </rules>
 </nlog>");
 
-            var autoLoadedTarget = configuration.FindTargetByName("t");
-            Assert.Equal("NLogAutloadExtension.AutoLoadTarget", autoLoadedTarget.GetType().FullName);
+                var autoLoadedTarget = configuration.FindTargetByName("t");
+                Assert.Equal("NLogAutloadExtension.AutoLoadTarget", autoLoadedTarget.GetType().FullName);
+            }
+            finally
+            {
+                ConfigurationItemFactory.Default.Clear();
+                ConfigurationItemFactory.Default = null; //build new factory next time
+            }
         }
-#endif
+
+        [Theory]
+        [InlineData(true)]
+        [InlineData(false)]
+        public void Extension_loading_could_be_canceled(bool cancel)
+        {
+
+            EventHandler<AssemblyLoadingEventArgs> onAssemblyLoading = (sender, e) =>
+            {
+                if (e.Assembly.FullName.Contains("NLogAutloadExtension"))
+                {
+                    e.Cancel = cancel;
+                }
+            };
+
+            try
+            {
+                ConfigurationItemFactory.Default = null; //build new factory next time
+                ConfigurationItemFactory.AssemblyLoading += onAssemblyLoading;
+
+                var configuration = CreateConfigurationFromString(@"
+<nlog throwExceptions='false'>
+    <targets>
+        <target name='t' type='AutoLoadTarget' />
+    </targets>
+
+    <rules>
+      <logger name='*' writeTo='t'>
+      </logger>
+    </rules>
+</nlog>");
+
+
+
+                var autoLoadedTarget = configuration.FindTargetByName("t");
+
+                if (cancel)
+                {
+                    Assert.Null(autoLoadedTarget);
+                }
+                else
+                {
+                    Assert.Equal("NLogAutloadExtension.AutoLoadTarget", autoLoadedTarget.GetType().FullName);
+                }
+            }
+            finally
+            {
+                //cleanup
+                ConfigurationItemFactory.AssemblyLoading -= onAssemblyLoading;
+                ConfigurationItemFactory.Default.Clear();
+                ConfigurationItemFactory.Default = null; //build new factory next time
+
+            }
+        }
+
+        [Fact]
+        public void Extensions_NLogPackageLoader_should_beCalled()
+        {
+            try
+            {
+
+                var writer = new StringWriter();
+                InternalLogger.LogWriter = writer;
+                InternalLogger.LogLevel = LogLevel.Debug;
+                //reload ConfigurationItemFactory 
+                ConfigurationItemFactory.Default = null;
+                var fact = ConfigurationItemFactory.Default;
+
+                //also throw exceptions 
+                LogManager.Configuration = CreateConfigurationFromString(@"
+<nlog throwExceptions='true'>
+
+</nlog>");
+
+
+                var logs = writer.ToString();
+                Assert.Contains("Preload succesfully invoked for 'LoaderTestInternal.NLogPackageLoader'", logs);
+                Assert.Contains("Preload succesfully invoked for 'LoaderTestPublic.NLogPackageLoader'", logs);
+                Assert.Contains("Preload succesfully invoked for 'LoaderTestPrivateNestedStatic.SomeType+NLogPackageLoader'", logs);
+                Assert.Contains("Preload succesfully invoked for 'LoaderTestPrivateNested.SomeType+NLogPackageLoader'", logs);
+
+                //4 times succesful
+                Assert.Equal(4, Regex.Matches(logs, Regex.Escape("Preload succesfully invoked for '")).Count);
+
+            }
+            finally
+            {
+                InternalLogger.LogWriter = null;
+            }
+        }
     }
 }

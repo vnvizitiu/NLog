@@ -31,8 +31,6 @@
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
 
-#if !SILVERLIGHT
-
 namespace NLog.UnitTests.LayoutRenderers
 {
     using System.Runtime.CompilerServices;
@@ -101,8 +99,9 @@ namespace NLog.UnitTests.LayoutRenderers
 
             AssertDebugLastMessageContains("debug", "RenderStackTrace_raw at offset ");
             AssertDebugLastMessageContains("debug", "RenderMe at offset ");
-            AssertDebugLastMessageContains("debug", "<filename unknown>");
-
+#if !MONO
+            AssertDebugLastMessageContains("debug", "StackTraceRendererTests.cs");
+#endif
         }
 
         [Fact]
@@ -120,7 +119,6 @@ namespace NLog.UnitTests.LayoutRenderers
             AssertDebugLastMessageContains("debug", " => [Void RenderStackTrace_DetailedFlat()] => [Void RenderMe(System.String)]");
         }
 
-
         [MethodImpl(MethodImplOptions.NoInlining)]
         private void RenderMe(string message)
         {
@@ -130,5 +128,3 @@ namespace NLog.UnitTests.LayoutRenderers
     }
 
 }
-
-#endif

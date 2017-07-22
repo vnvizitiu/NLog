@@ -31,6 +31,7 @@
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
 
+using System.Collections.Generic;
 using NLog.Config;
 using NLog.Internal;
 using NLog.Layouts;
@@ -48,7 +49,6 @@ namespace NLog.UnitTests.LayoutRenderers
 
     public class CallSiteTests : NLogTestBase
     {
-#if !SILVERLIGHT
         [Fact]
         public void HiddenAssemblyTest()
         {
@@ -115,9 +115,7 @@ namespace NLog.UnitTests.LayoutRenderers
             MethodBase currentMethod = MethodBase.GetCurrentMethod();
             AssertDebugLastMessage("debug", currentMethod.DeclaringType.FullName + "." + currentMethod.Name + " msg");
         }
-#endif
 
-#if !SILVERLIGHT
 #if MONO
         [Fact(Skip="Not working under MONO - not sure if unit test is wrong, or the code")]
 #else
@@ -147,7 +145,6 @@ namespace NLog.UnitTests.LayoutRenderers
 #line default
 #endif
         }
-#endif
 
         [Fact]
         public void MethodNameTest()
@@ -199,8 +196,23 @@ namespace NLog.UnitTests.LayoutRenderers
 
             ILogger logger = LogManager.GetLogger("A");
             logger.Debug("msg");
-            MethodBase currentMethod = MethodBase.GetCurrentMethod();
-            AssertDebugLastMessage("debug", currentMethod.DeclaringType.FullName + " msg");
+            AssertDebugLastMessage("debug", "NLog.UnitTests.LayoutRenderers.CallSiteTests msg");
+        }
+
+        [Fact]
+        public void ClassNameTestWithoutNamespace()
+        {
+            LogManager.Configuration = CreateConfigurationFromString(@"
+            <nlog>
+                <targets><target name='debug' type='Debug' layout='${callsite:classname=true:methodname=false:includeNamespace=false} ${message}' /></targets>
+                <rules>
+                    <logger name='*' minlevel='Debug' writeTo='debug' />
+                </rules>
+            </nlog>");
+
+            ILogger logger = LogManager.GetLogger("A");
+            logger.Debug("msg");
+            AssertDebugLastMessage("debug", "CallSiteTests msg");
         }
 
         [Fact]
@@ -735,6 +747,34 @@ namespace NLog.UnitTests.LayoutRenderers
 
         }
 
+        public async Task<IEnumerable<string>> AsyncMethod4()
+        {
+            NLog.Logger logger = NLog.LogManager.GetLogger("AnnonTest");
+            logger.Info("Direct, async method");
+
+            return await Task.FromResult(new string[] { "value1", "value2" });
+        }
+
+        [Fact]
+        public void Show_correct_method_with_async4()
+        {
+
+            //namespace en name of current method
+            const string currentMethodFullName = "NLog.UnitTests.LayoutRenderers.CallSiteTests.AsyncMethod4";
+
+            LogManager.Configuration = CreateConfigurationFromString(@"
+           <nlog>
+               <targets><target name='debug' type='Debug' layout='${callsite}|${message}' /></targets>
+               <rules>
+                   <logger name='*' levels='Info' writeTo='debug' />
+               </rules>
+           </nlog>");
+
+            AsyncMethod4().Wait();
+            AssertDebugLastMessage("debug", string.Format("{0}|Direct, async method", currentMethodFullName));
+
+        }
+
         [Fact]
         public void CallSiteShouldWorkForAsyncMethodsWithReturnValue()
         {
@@ -907,27 +947,45 @@ namespace NLog.UnitTests.LayoutRenderers
 
             // Step 2. Create targets and add them to the configuration 
             var target = new MemoryTarget();
-            config.AddTarget("target", target);
+            var wrapper = new NLog.Targets.Wrappers.AsyncTargetWrapper(target) { TimeToSleepBetweenBatches = 0 };
+            config.AddTarget("target", wrapper);
 
             // Step 3. Set target properties 
-            target.Layout = "${date:format=HH\\:MM\\:ss} ${logger} ${callsite} ${message}";
+            target.Layout = "${date:format=HH\\:MM\\:ss} ${logger} ${message}";
 
             // Step 4. Define rules
-            var rule = new LoggingRule("*", LogLevel.Debug, target);
+            var rule = new LoggingRule("*", LogLevel.Debug, wrapper);
             config.LoggingRules.Add(rule);
 
-
+            LogManager.Configuration = config;
             var factory = new NLogFactory(config);
+            var logger = factory.Create("MyLoggerName");
 
-            WriteLogMessage(factory);
+            WriteLogMessage(logger);
+            LogManager.Flush();
             var logMessage = target.Logs[0];
+            Assert.Contains("MyLoggerName", logMessage);
+
+            // See that LogManager.ReconfigExistingLoggers() is able to upgrade the Logger
+            target.Layout = "${date:format=HH\\:MM\\:ss} ${logger} ${callsite} ${message}";
+            LogManager.ReconfigExistingLoggers();
+            WriteLogMessage(logger);
+            LogManager.Flush();
+            logMessage = target.Logs[1];
             Assert.Contains("CallSiteTests.WriteLogMessage", logMessage);
+
+            // See that LogManager.ReconfigExistingLoggers() is able to upgrade the Logger
+            target.Layout = "${date:format=HH\\:MM\\:ss} ${logger} ${callsite} ${message} ThreadId=${threadid}";
+            LogManager.ReconfigExistingLoggers();
+            WriteLogMessage(logger);
+            LogManager.Flush();
+            logMessage = target.Logs[2];
+            Assert.Contains("ThreadId=" + Thread.CurrentThread.ManagedThreadId.ToString(), logMessage);
         }
 
         [MethodImpl(MethodImplOptions.NoInlining)]
-        private void WriteLogMessage(NLogFactory factory)
+        private void WriteLogMessage(NLogLogger logger)
         {
-            var logger = factory.Create("MyLoggerName");
             logger.Debug("something");
         }
 
@@ -1028,6 +1086,5 @@ namespace NLog.UnitTests.LayoutRenderers
         }
 
     }
-
 }
 

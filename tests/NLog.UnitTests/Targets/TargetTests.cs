@@ -468,7 +468,7 @@ namespace NLog.UnitTests.Targets
             {
                 try
                 {
-                    target.BlockingOperation(1000);
+                    target.BlockingOperation(500);
                 }
                 catch (Exception ex)
                 {
@@ -589,7 +589,7 @@ namespace NLog.UnitTests.Targets
                 base.Write(logEvent);
             }
 
-            protected override void Write(AsyncLogEventInfo[] logEvents)
+            protected override void Write(IList<AsyncLogEventInfo> logEvents)
             {
                 Assert.Equal(0, this.inBlockingOperation);
                 this.WriteCount3++;
@@ -615,8 +615,6 @@ namespace NLog.UnitTests.Targets
             SimpleConfigurator.ConfigureForTargetLogging(target);
             var logger = LogManager.GetLogger("WrongMyTargetShouldThrowException");
             logger.Info("Testing");
-            var layouts = target.GetAllLayouts();
-            Assert.NotNull(layouts);
         }
 
 

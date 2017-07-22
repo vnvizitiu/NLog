@@ -42,7 +42,6 @@ namespace NLog.UnitTests.Layouts
 
     public class CsvLayoutTests : NLogTestBase
     {
-#if !SILVERLIGHT
         [Fact]
         public void EndToEndTest()
         {
@@ -180,7 +179,6 @@ namespace NLog.UnitTests.Layouts
                 }
             }
         }
-#endif
 
         [Fact]
         public void CsvLayoutRenderingNoQuoting()
@@ -333,6 +331,7 @@ namespace NLog.UnitTests.Layouts
                         new CsvColumn("date", "${longdate}"),
                         new CsvColumn("level", "${level}"),
                         new CsvColumn("message", "${message}"),
+                        new CsvColumn("threadid", "${threadid}"),
                     },
                 QuoteChar = "'",
                 Delimiter = CsvColumnDelimiterMode.Semicolon,
@@ -358,9 +357,7 @@ namespace NLog.UnitTests.Layouts
             var r22 = csvLayout.Render(e2);
 
             var h11 = csvLayout.Header.Render(e1);
-            var h12 = csvLayout.Header.Render(e1);
             var h21 = csvLayout.Header.Render(e2);
-            var h22 = csvLayout.Header.Render(e2);
 
             Assert.Same(r11, r12);
             Assert.Same(r21, r22);
@@ -368,11 +365,8 @@ namespace NLog.UnitTests.Layouts
             Assert.NotSame(r11, r21);
             Assert.NotSame(r12, r22);
 
-            Assert.Same(h11, h12);
-            Assert.Same(h21, h22);
-
             Assert.NotSame(h11, h21);
-            Assert.NotSame(h12, h22);
+            Assert.Equal(h11, h21);
         }
     }
 }

@@ -58,20 +58,43 @@ namespace NLog.Layouts
         public Log4JXmlEventLayoutRenderer Renderer { get; private set; }
 
         /// <summary>
+        /// Gets or sets a value indicating whether to include contents of the <see cref="MappedDiagnosticsContext"/> dictionary.
+        /// </summary>
+        /// <docgen category='Payload Options' order='10' />
+        public bool IncludeMdc { get { return Renderer.IncludeMdc; } set { Renderer.IncludeMdc = value; } }
+
+#if NET4_0 || NET4_5
+        /// <summary>
+        /// Gets or sets a value indicating whether to include contents of the <see cref="MappedDiagnosticsLogicalContext"/> dictionary.
+        /// </summary>
+        /// <docgen category='Payload Options' order='10' />
+        public bool IncludeMdlc { get { return Renderer.IncludeMdlc; } set { Renderer.IncludeMdlc = value; } }
+#endif
+
+        /// <summary>
+        /// Gets or sets the option to include all properties from the log events
+        /// </summary>
+        /// <docgen category='Payload Options' order='10' />
+        public bool IncludeAllProperties { get { return Renderer.IncludeAllProperties; } set { Renderer.IncludeAllProperties = value; } }
+
+        /// <summary>
         /// Renders the layout for the specified logging event by invoking layout renderers.
         /// </summary>
         /// <param name="logEvent">The logging event.</param>
         /// <returns>The rendered layout.</returns>
         protected override string GetFormattedMessage(LogEventInfo logEvent)
         {
-            string cachedValue;
+            return RenderAllocateBuilder(logEvent);
+        }
 
-            if (logEvent.TryGetCachedLayoutValue(this, out cachedValue))
-            {
-                return cachedValue;
-            }
-
-            return logEvent.AddCachedLayoutValue(this, this.Renderer.Render(logEvent));
+        /// <summary>
+        /// Renders the layout for the specified logging event by invoking layout renderers.
+        /// </summary>
+        /// <param name="logEvent">The logging event.</param>
+        /// <param name="target">Initially empty <see cref="System.Text.StringBuilder"/> for the result</param>
+        protected override void RenderFormattedMessage(LogEventInfo logEvent, System.Text.StringBuilder target)
+        {
+            this.Renderer.RenderAppendBuilder(logEvent, target);
         }
     }
 }

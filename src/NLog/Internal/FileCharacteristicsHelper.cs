@@ -34,6 +34,7 @@
 namespace NLog.Internal
 {
     using System;
+    using System.IO;
 
     /// <summary>
     /// Optimized routines to get the basic file characteristics of the specified file.
@@ -43,30 +44,41 @@ namespace NLog.Internal
         /// <summary>
         /// Initializes static members of the FileCharacteristicsHelper class.
         /// </summary>
-        static FileCharacteristicsHelper()
+        public static FileCharacteristicsHelper CreateHelper(bool forcedManaged)
         {
-#if SILVERLIGHT
-            Helper = new PortableFileCharacteristicsHelper();
-#else
-            if (PlatformDetector.IsDesktopWin32)
+#if !SILVERLIGHT && !__IOS__ && !__ANDROID__
+            if (!forcedManaged && PlatformDetector.IsDesktopWin32 && !PlatformDetector.IsMono)
             {
-                Helper = new Win32FileCharacteristicsHelper();
+                return new Win32FileCharacteristicsHelper();
             }
             else
-            {
-                Helper = new PortableFileCharacteristicsHelper();
-            }
 #endif
+            {
+                return new PortableFileCharacteristicsHelper();
+            }
         }
-
-        internal static FileCharacteristicsHelper Helper { get; private set; }
 
         /// <summary>
         /// Gets the information about a file.
         /// </summary>
         /// <param name="fileName">Name of the file.</param>
-        /// <param name="fileHandle">The file handle.</param>
+        /// <param name="fileStream">The file stream.</param>
         /// <returns>The file characteristics, if the file information was retrieved successfully, otherwise null.</returns>
-        public abstract FileCharacteristics GetFileCharacteristics(string fileName, IntPtr fileHandle);
+        public abstract FileCharacteristics GetFileCharacteristics(string fileName, FileStream fileStream);
+
+        public static DateTime? ValidateFileCreationTime<T>(T fileInfo, Func<T, DateTime?> primary, Func<T, DateTime?> fallback, Func<T, DateTime?> finalFallback = null)
+        {
+            DateTime? fileCreationTime = primary(fileInfo);
+            // Non-Windows-FileSystems doesn't always provide correct CreationTime/BirthTime
+            if (fileCreationTime.HasValue && fileCreationTime.Value.Year < 1980 && !PlatformDetector.IsDesktopWin32)
+            {
+                fileCreationTime = fallback(fileInfo);
+                if (finalFallback != null && (!fileCreationTime.HasValue || fileCreationTime.Value.Year < 1980))
+                {
+                    fileCreationTime = finalFallback(fileInfo);
+                }
+            }
+            return fileCreationTime;
+        }
     }
 }

@@ -67,6 +67,7 @@ namespace NLog.Targets
         {
             this.LastMessage = string.Empty;
             this.Counter = 0;
+            this.OptimizeBufferReuse = true;
         }
 
         /// <summary>
@@ -100,7 +101,7 @@ namespace NLog.Targets
         protected override void Write(LogEventInfo logEvent)
         {
             this.Counter++;
-            this.LastMessage = this.Layout.Render(logEvent);
+            this.LastMessage = this.RenderLogEvent(this.Layout, logEvent);
         }
     }
 }

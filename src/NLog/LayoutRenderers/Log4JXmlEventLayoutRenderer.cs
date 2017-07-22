@@ -55,13 +55,15 @@ namespace NLog.LayoutRenderers
         private static readonly DateTime log4jDateBase = new DateTime(1970, 1, 1);
 
         private static readonly string dummyNamespace = "http://nlog-project.org/dummynamespace/" + Guid.NewGuid();
+        private static readonly string dummyNamespaceRemover = " xmlns:log4j=\"" + dummyNamespace + "\"";
 
         private static readonly string dummyNLogNamespace = "http://nlog-project.org/dummynamespace/" + Guid.NewGuid();
+        private static readonly string dummyNLogNamespaceRemover = " xmlns:nlog=\"" + dummyNLogNamespace + "\"";
 
         /// <summary>
         /// Initializes a new instance of the <see cref="Log4JXmlEventLayoutRenderer" /> class.
         /// </summary>
-        public Log4JXmlEventLayoutRenderer() : this(AppDomainWrapper.CurrentDomain)
+        public Log4JXmlEventLayoutRenderer() : this(LogFactory.CurrentAppDomain)
         {
         }
         
@@ -86,6 +88,26 @@ namespace NLog.LayoutRenderers
 #endif
 
             this.Parameters = new List<NLogViewerParameterInfo>();
+
+            try
+            {
+#if SILVERLIGHT
+                this.machineName = "silverlight";
+#else
+                this.machineName = Environment.MachineName;
+#endif
+            }
+            catch (System.Security.SecurityException)
+            {
+                this.machineName = string.Empty;
+            }
+
+            this.xmlWriterSettings = new XmlWriterSettings
+            {
+                Indent = this.IndentXml,
+                ConformanceLevel = ConformanceLevel.Fragment,
+                IndentChars = "  ",
+            };
         }
 
         /// <summary>
@@ -125,6 +147,20 @@ namespace NLog.LayoutRenderers
         /// <docgen category='Payload Options' order='10' />
         public bool IncludeMdc { get; set; }
 
+#if NET4_0 || NET4_5
+        /// <summary>
+        /// Gets or sets a value indicating whether to include contents of the <see cref="MappedDiagnosticsLogicalContext"/> dictionary.
+        /// </summary>
+        /// <docgen category='Payload Options' order='10' />
+        public bool IncludeMdlc { get; set; }
+#endif
+
+        /// <summary>
+        /// Gets or sets the option to include all properties from the log events
+        /// </summary>
+        /// <docgen category='Payload Options' order='10' />
+        public bool IncludeAllProperties { get; set; }
+
         /// <summary>
         /// Gets or sets a value indicating whether to include contents of the <see cref="NestedDiagnosticsContext"/> stack.
         /// </summary>
@@ -137,6 +173,10 @@ namespace NLog.LayoutRenderers
         /// <docgen category='Payload Options' order='10' />
         [DefaultValue(" ")]
         public string NdcItemSeparator { get; set; }
+
+        private readonly string machineName;
+
+        private readonly XmlWriterSettings xmlWriterSettings;
 
         /// <summary>
         /// Gets the level of stack trace information required by the implementing class.
@@ -173,15 +213,8 @@ namespace NLog.LayoutRenderers
         /// <param name="logEvent">Logging event.</param>
         protected override void Append(StringBuilder builder, LogEventInfo logEvent)
         {
-            var settings = new XmlWriterSettings
-            {
-                Indent = this.IndentXml,
-                ConformanceLevel = ConformanceLevel.Fragment,
-                IndentChars = "  ",
-            };
-
-            var sb = new StringBuilder();
-            using (XmlWriter xtw = XmlWriter.Create(sb, settings))
+            StringBuilder sb = new StringBuilder();
+            using (XmlWriter xtw = XmlWriter.Create(sb, this.xmlWriterSettings))
             {
                 xtw.WriteStartElement("log4j", "event", dummyNamespace);
                 xtw.WriteAttributeSafeString("xmlns", "nlog", null, dummyNLogNamespace);
@@ -240,20 +273,12 @@ namespace NLog.LayoutRenderers
                             {
                                 xtw.WriteAttributeSafeString("assembly", type.Assembly.FullName);
                             }
-
                             xtw.WriteEndElement();
 
                             xtw.WriteStartElement("nlog", "properties", dummyNLogNamespace);
-                            foreach (var contextProperty in logEvent.Properties)
-                            {
-                                xtw.WriteStartElement("nlog", "data", dummyNLogNamespace);
-                                xtw.WriteAttributeSafeString("name", Convert.ToString(contextProperty.Key, CultureInfo.InvariantCulture));
-                                xtw.WriteAttributeSafeString("value", Convert.ToString(contextProperty.Value, CultureInfo.InvariantCulture));
-                                xtw.WriteEndElement();
-                            }
+                            AppendProperties("nlog", xtw, logEvent);
                             xtw.WriteEndElement();
                         }
-                        
                     }
                 }
 
@@ -262,19 +287,48 @@ namespace NLog.LayoutRenderers
                 {
                     foreach (string key in MappedDiagnosticsContext.GetNames())
                     {
+                        string propertyValue = XmlHelper.XmlConvertToString(MappedDiagnosticsContext.GetObject(key));
+                        if (propertyValue == null)
+                            continue;
+
                         xtw.WriteStartElement("log4j", "data", dummyNamespace);
                         xtw.WriteAttributeSafeString("name", key);
-                        xtw.WriteAttributeSafeString("value", String.Format(logEvent.FormatProvider, "{0}", MappedDiagnosticsContext.GetObject(key)));
+                        xtw.WriteAttributeSafeString("value", propertyValue);
                         xtw.WriteEndElement();
                     }
                 }
 
-                foreach (NLogViewerParameterInfo parameter in this.Parameters)
+#if NET4_0 || NET4_5
+                if (this.IncludeMdlc)
                 {
-                    xtw.WriteStartElement("log4j", "data", dummyNamespace);
-                    xtw.WriteAttributeSafeString("name", parameter.Name);
-                    xtw.WriteAttributeSafeString("value", parameter.Layout.Render(logEvent));
-                    xtw.WriteEndElement();
+                    foreach (string key in MappedDiagnosticsLogicalContext.GetNames())
+                    {
+                        string propertyValue = XmlHelper.XmlConvertToString(MappedDiagnosticsLogicalContext.GetObject(key));
+                        if (propertyValue == null)
+                            continue;
+
+                        xtw.WriteStartElement("log4j", "data", dummyNamespace);
+                        xtw.WriteAttributeSafeString("name", key);
+                        xtw.WriteAttributeSafeString("value", propertyValue);
+                        xtw.WriteEndElement();
+                    }
+                }
+#endif
+
+                if (this.IncludeAllProperties)
+                {
+                    AppendProperties("log4j", xtw, logEvent);
+                }
+
+                if (this.Parameters.Count > 0)
+                {
+                    foreach (NLogViewerParameterInfo parameter in this.Parameters)
+                    {
+                        xtw.WriteStartElement("log4j", "data", dummyNamespace);
+                        xtw.WriteAttributeSafeString("name", parameter.Name);
+                        xtw.WriteAttributeSafeString("value", parameter.Layout.Render(logEvent));
+                        xtw.WriteEndElement();
+                    }
                 }
 
                 xtw.WriteStartElement("log4j", "data", dummyNamespace);
@@ -284,23 +338,40 @@ namespace NLog.LayoutRenderers
 
                 xtw.WriteStartElement("log4j", "data", dummyNamespace);
                 xtw.WriteAttributeSafeString("name", "log4jmachinename");
-
-#if SILVERLIGHT
-            xtw.WriteAttributeSafeString("value", "silverlight");
-#else
-                xtw.WriteAttributeSafeString("value", Environment.MachineName);
-#endif
+                xtw.WriteAttributeSafeString("value", this.machineName);
                 xtw.WriteEndElement();
+
                 xtw.WriteEndElement();
 
                 xtw.WriteEndElement();
                 xtw.Flush();
 
                 // get rid of 'nlog' and 'log4j' namespace declarations
-                sb.Replace(" xmlns:log4j=\"" + dummyNamespace + "\"", string.Empty);
-                sb.Replace(" xmlns:nlog=\"" + dummyNLogNamespace + "\"", string.Empty);
+                sb.Replace(dummyNamespaceRemover, string.Empty);
+                sb.Replace(dummyNLogNamespaceRemover, string.Empty);
+                builder.Append(sb.ToString());  // StringBuilder.Replace is not good when reusing the StringBuilder
+            }
+        }
 
-                builder.Append(sb.ToString());
+        private void AppendProperties(string prefix, XmlWriter xtw, LogEventInfo logEvent)
+        {
+            if (logEvent.HasProperties)
+            {
+                foreach (var contextProperty in logEvent.Properties)
+                {
+                    string propertyKey = XmlHelper.XmlConvertToString(contextProperty.Key);
+                    if (string.IsNullOrEmpty(propertyKey))
+                        continue;
+
+                    string propertyValue = XmlHelper.XmlConvertToString(contextProperty.Value);
+                    if (propertyValue == null)
+                        continue;
+
+                    xtw.WriteStartElement(prefix, "data", dummyNamespace);
+                    xtw.WriteAttributeSafeString("name", propertyKey);
+                    xtw.WriteAttributeSafeString("value", propertyValue);
+                    xtw.WriteEndElement();
+                }
             }
         }
     }

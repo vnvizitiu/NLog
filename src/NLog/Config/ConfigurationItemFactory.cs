@@ -50,6 +50,8 @@ namespace NLog.Config
 
     /// <summary>
     /// Provides registration information for named items (targets, layouts, layout renderers, etc.) managed by NLog.
+    /// 
+    /// Everything of an assembly could be loaded by <see cref="RegisterItemsFromAssembly(System.Reflection.Assembly)"/>
     /// </summary>
     public class ConfigurationItemFactory
     {
@@ -58,11 +60,18 @@ namespace NLog.Config
         private readonly IList<object> allFactories;
         private readonly Factory<Target, TargetAttribute> targets;
         private readonly Factory<Filter, FilterAttribute> filters;
-        private readonly Factory<LayoutRenderer, LayoutRendererAttribute> layoutRenderers;
+        private readonly LayoutRendererFactory layoutRenderers;
         private readonly Factory<Layout, LayoutAttribute> layouts;
         private readonly MethodFactory<ConditionMethodsAttribute, ConditionMethodAttribute> conditionMethods;
         private readonly Factory<LayoutRenderer, AmbientPropertyAttribute> ambientProperties;
         private readonly Factory<TimeSource, TimeSourceAttribute> timeSources;
+
+        private IJsonConverter jsonSerializer = DefaultJsonSerializer.Instance;
+
+        /// <summary>
+        /// Called before the assembly will be loaded.
+        /// </summary>
+        public static event EventHandler<AssemblyLoadingEventArgs> AssemblyLoading;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="ConfigurationItemFactory"/> class.
@@ -73,7 +82,7 @@ namespace NLog.Config
             this.CreateInstance = FactoryHelper.CreateInstance;
             this.targets = new Factory<Target, TargetAttribute>(this);
             this.filters = new Factory<Filter, FilterAttribute>(this);
-            this.layoutRenderers = new Factory<LayoutRenderer, LayoutRendererAttribute>(this);
+            this.layoutRenderers = new LayoutRendererFactory(this);
             this.layouts = new Factory<Layout, LayoutAttribute>(this);
             this.conditionMethods = new MethodFactory<ConditionMethodsAttribute, ConditionMethodAttribute>();
             this.ambientProperties = new Factory<LayoutRenderer, AmbientPropertyAttribute>(this);
@@ -140,6 +149,16 @@ namespace NLog.Config
         }
 
         /// <summary>
+        /// gets the <see cref="LayoutRenderer"/> factory
+        /// </summary>
+        /// <remarks>not using <see cref="layoutRenderers"/> due to backwardscomp.</remarks>
+        /// <returns></returns>
+        internal LayoutRendererFactory GetLayoutRenderers()
+        {
+            return this.layoutRenderers;
+        }
+
+        /// <summary>
         /// Gets the <see cref="LayoutRenderer"/> factory.
         /// </summary>
         /// <value>The layout renderer factory.</value>
@@ -165,6 +184,25 @@ namespace NLog.Config
         {
             get { return this.ambientProperties; }
         }
+        
+        /// <summary>
+        /// Legacy interface, no longer used by the NLog engine
+        /// </summary>
+        [Obsolete("Use JsonConverter property instead. Marked obsolete on NLog 4.5")]
+        public NLog.Targets.IJsonSerializer JsonSerializer
+        {
+            get { return jsonSerializer as NLog.Targets.IJsonSerializer; }
+            set { jsonSerializer = value != null ? (IJsonConverter)new JsonConverterLegacy(value) : DefaultJsonSerializer.Instance; }
+        }
+
+        /// <summary>
+        /// Gets or sets the JSON serializer to use with <see cref="WebServiceTarget"/> or <see cref="JsonLayout"/>
+        /// </summary>
+        public IJsonConverter JsonConverter
+        {
+            get { return jsonSerializer; }
+            set { jsonSerializer = value ?? DefaultJsonSerializer.Instance; }
+        }
 
         /// <summary>
         /// Gets the time source factory.
@@ -184,6 +222,8 @@ namespace NLog.Config
             get { return this.conditionMethods; }
         }
 
+
+
         /// <summary>
         /// Registers named items from the assembly.
         /// </summary>
@@ -200,11 +240,82 @@ namespace NLog.Config
         /// <param name="itemNamePrefix">Item name prefix.</param>
         public void RegisterItemsFromAssembly(Assembly assembly, string itemNamePrefix)
         {
+            if (AssemblyLoading != null)
+            {
+                var args = new AssemblyLoadingEventArgs(assembly);
+                AssemblyLoading.Invoke(this,args);
+                if (args.Cancel)
+                {
+                    InternalLogger.Info("Loading assembly '{0}' is canceled", assembly.FullName);
+                    return;
+                }
+            }
+
             InternalLogger.Debug("ScanAssembly('{0}')", assembly.FullName);
             var typesToScan = assembly.SafeGetTypes();
+            PreloadAssembly(typesToScan);
             foreach (IFactory f in this.allFactories)
             {
                 f.ScanTypes(typesToScan, itemNamePrefix);
+            }
+        }
+
+        /// <summary>
+        /// Call Preload for NLogPackageLoader
+        /// </summary>
+        /// <remarks>
+        /// Every package could implement a class "NLogPackageLoader" (namespace not important) with the public static method "Preload" (no arguments)
+        /// This method will be called just before registering all items in the assembly.
+        /// </remarks>
+        /// <param name="typesToScan"></param>
+        public void PreloadAssembly(Type[] typesToScan)
+        {
+            var types = typesToScan.Where(t => t.Name.Equals("NLogPackageLoader", StringComparison.OrdinalIgnoreCase));
+
+            foreach (var type in types)
+            {
+                CallPreload(type);
+            }
+        }
+
+        /// <summary>
+        /// Call the Preload method for <paramref name="type"/>. The Preload method must be static.
+        /// </summary>
+        /// <param name="type"></param>
+        private static void CallPreload(Type type)
+        {
+            if (type != null)
+            {
+                InternalLogger.Debug("Found for preload'{0}'", type.FullName);
+                var preloadMethod = type.GetMethod("Preload");
+                if (preloadMethod != null)
+                {
+                    if (preloadMethod.IsStatic)
+                    {
+
+                        InternalLogger.Debug("NLogPackageLoader contains Preload method");
+                        //only static, so first param null
+                        try
+                        {
+                            preloadMethod.Invoke(null, null);
+                            InternalLogger.Debug("Preload succesfully invoked for '{0}'", type.FullName);
+                        }
+                        catch (Exception e)
+                        {
+                            InternalLogger.Warn(e,"Invoking Preload for '{0}' failed", type.FullName);
+                        }
+                    }
+                    else
+                    {
+                        InternalLogger.Debug("NLogPackageLoader contains a preload method, but isn't static");
+                    }
+
+
+                }
+                else
+                {
+                    InternalLogger.Debug("{0} doesn't contain Preload method", type.FullName);
+                }
             }
         }
 
@@ -243,20 +354,26 @@ namespace NLog.Config
             factory.RegisterExtendedItems();
 #if !SILVERLIGHT
 
-            var assemblyLocation = Path.GetDirectoryName(new Uri(nlogAssembly.CodeBase).LocalPath);
-            if (assemblyLocation == null)
-            {
-                InternalLogger.Warn("No auto loading because Nlog.dll location is unknown");
-                return factory;
-            }
-            if (!Directory.Exists(assemblyLocation))
-            {
-                InternalLogger.Warn("No auto loading because '{0}' doesn't exists", assemblyLocation);
-                return factory;
-            }
-
             try
             {
+                Uri assemblyCodeBase;
+                if (!Uri.TryCreate(nlogAssembly.CodeBase, UriKind.RelativeOrAbsolute, out assemblyCodeBase))
+                {
+                    InternalLogger.Warn("No auto loading because assembly code base is unknown");
+                    return factory;
+                }
+
+                var assemblyLocation = Path.GetDirectoryName(assemblyCodeBase.LocalPath);
+                if (assemblyLocation == null)
+                {
+                    InternalLogger.Warn("No auto loading because Nlog.dll location is unknown");
+                    return factory;
+                }
+                if (!Directory.Exists(assemblyLocation))
+                {
+                    InternalLogger.Warn("No auto loading because '{0}' doesn't exists", assemblyLocation);
+                    return factory;
+                }
 
                 var extensionDlls = Directory.GetFiles(assemblyLocation, "NLog*.dll")
                     .Select(Path.GetFileName)
@@ -292,6 +409,14 @@ namespace NLog.Config
                         InternalLogger.Info("Auto loading assembly file: {0} succeeded!", extensionDll);
                     }
 
+                }
+            }
+            catch (System.Security.SecurityException ex)
+            {
+                InternalLogger.Warn(ex, "Seems that we do not have permission");
+                if (ex.MustBeRethrown())
+                {
+                    throw;
                 }
             }
             catch (UnauthorizedAccessException ex)

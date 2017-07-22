@@ -33,25 +33,24 @@
 
 #if MONO
 
-using System;
-using System.Xml;
-using System.IO;
-using System.Threading;
-using System.Text;
-using System.Collections;
-using System.Collections.Specialized;
-
-using NLog;
-using NLog.Config;
-using NLog.Common;
-
-using NLog.Internal;
-
-using Mono.Unix;
-using Mono.Unix.Native;
-
 namespace NLog.Internal.FileAppenders
 {
+    using System;
+    using System.Collections;
+    using System.Collections.Specialized;
+    using System.IO;
+    using System.Text;
+    using System.Threading;
+    using System.Xml;
+
+    using NLog;
+    using NLog.Common;
+    using NLog.Config;
+    using NLog.Internal;
+
+    using Mono.Unix;
+    using Mono.Unix.Native;
+
     /// <summary>
     /// Provides a multiprocess-safe atomic file appends while
     /// keeping the files open.
@@ -67,9 +66,9 @@ namespace NLog.Internal.FileAppenders
 
         public static readonly IFileAppenderFactory TheFactory = new Factory();
 
-        public class Factory : IFileAppenderFactory
+        private class Factory : IFileAppenderFactory
         {
-            public BaseFileAppender Open(string fileName, ICreateFileParameters parameters)
+            BaseFileAppender IFileAppenderFactory.Open(string fileName, ICreateFileParameters parameters)
             {
                 return new UnixMultiProcessFileAppender(fileName, parameters);
             }
@@ -77,6 +76,17 @@ namespace NLog.Internal.FileAppenders
 
         public UnixMultiProcessFileAppender(string fileName, ICreateFileParameters parameters) : base(fileName, parameters)
         {
+            UnixFileInfo fileInfo = null;
+            bool fileExists = false;
+            try
+            {
+                fileInfo = new UnixFileInfo(fileName);
+                fileExists = fileInfo.Exists;
+            }
+            catch
+            {
+            }
+
             int fd = Syscall.open(fileName, OpenFlags.O_CREAT | OpenFlags.O_WRONLY | OpenFlags.O_APPEND, (FilePermissions)(6 | (6 << 3) | (6 << 6)));
             if (fd == -1)
             {
@@ -95,6 +105,25 @@ namespace NLog.Internal.FileAppenders
             try
             {
                 this.file = new UnixStream(fd, true);
+
+                long filePosition = this.file.Position;
+                if (fileExists || filePosition > 0)
+                {
+                    if (fileInfo != null)
+                    {
+                        this.CreationTimeUtc = FileCharacteristicsHelper.ValidateFileCreationTime(fileInfo, (f) => File.GetCreationTimeUtc(f.FullName), (f) => { f.Refresh(); return f.LastStatusChangeTimeUtc; }, (f) => DateTime.UtcNow).Value;
+                    }
+                    else
+                    {
+                        this.CreationTimeUtc = FileCharacteristicsHelper.ValidateFileCreationTime(fileName, (f) => File.GetCreationTimeUtc(f), (f) => DateTime.UtcNow).Value;
+                    }
+                }
+                else
+                {
+                    // We actually created the file and eventually concurrent processes 
+                    this.CreationTimeUtc = DateTime.UtcNow;
+                    File.SetCreationTimeUtc(this.FileName, this.CreationTimeUtc);
+                }
             }
             catch
             {
@@ -103,30 +132,58 @@ namespace NLog.Internal.FileAppenders
             }
         }
 
-        public override void Write(byte[] bytes)
+        /// <summary>
+        /// Writes the specified bytes.
+        /// </summary>
+        /// <param name="bytes">The bytes array.</param>
+        /// <param name="offset">The bytes array offset.</param>
+        /// <param name="count">The number of bytes.</param>
+        public override void Write(byte[] bytes, int offset, int count)
         {
             if (this.file == null)
                 return;
-            this.file.Write(bytes, 0, bytes.Length);
+            this.file.Write(bytes, offset, count);
         }
 
+        /// <summary>
+        /// Closes this instance.
+        /// </summary>
         public override void Close()
         {
             if (this.file == null)
                 return;
             InternalLogger.Trace("Closing '{0}'", FileName);
-            this.file.Close();
-            this.file = null;
+            try
+            {
+                this.file.Close();
+            }
+            catch (Exception ex)
+            {
+                // Swallow exception as the file-stream now is in final state (broken instead of closed)
+                InternalLogger.Warn(ex, "Failed to close file '{0}'", FileName);
+                System.Threading.Thread.Sleep(1);   // Artificial delay to avoid hammering a bad file location
+            }
+            finally
+            {
+                this.file = null;
+            }
         }
-
+        
+        /// <summary>
+        /// Gets the creation time for a file associated with the appender. The time returned is in Coordinated Universal 
+        /// Time [UTC] standard.
+        /// </summary>
+        /// <returns>The file creation time.</returns>
         public override DateTime? GetFileCreationTimeUtc()
         {
-            FileInfo fileInfo = new FileInfo(FileName);
-            if (!fileInfo.Exists)
-                return null;
-            return fileInfo.CreationTime;
+            return this.CreationTimeUtc;    // File is kept open, so creation time is static
         }
-
+        
+        /// <summary>
+        /// Gets the last time the file associated with the appeander is written. The time returned is in Coordinated 
+        /// Universal Time [UTC] standard.
+        /// </summary>
+        /// <returns>The time the file was last written to.</returns>
         public override DateTime? GetFileLastWriteTimeUtc()
         {
             FileInfo fileInfo = new FileInfo(FileName);
@@ -135,6 +192,10 @@ namespace NLog.Internal.FileAppenders
             return fileInfo.LastWriteTime;
         }
 
+        /// <summary>
+        /// Gets the length in bytes of the file associated with the appeander.
+        /// </summary>
+        /// <returns>A long value representing the length of the file in bytes.</returns>
         public override long? GetFileLength()
         {
             FileInfo fileInfo = new FileInfo(FileName);

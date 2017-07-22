@@ -31,7 +31,6 @@
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
 
-//no silverlight because of xUnit needed
 #if !SILVERLIGHT && !__IOS__
 
 using Xunit;

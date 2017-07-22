@@ -40,6 +40,7 @@ namespace NLog.UnitTests.LayoutRenderers
     using System.Reflection;
     using System.IO;
     using Xunit;
+    using NLog.Internal;
 
     public class Log4JXmlTests : NLogTestBase
     {
@@ -49,7 +50,7 @@ namespace NLog.UnitTests.LayoutRenderers
             LogManager.Configuration = CreateConfigurationFromString(@"
             <nlog throwExceptions='true'>
                 <targets>
-        <target name='debug' type='Debug' layout='${log4jxmlevent:includeCallSite=true:includeSourceInfo=true:includeMdc=true:includendc=true:ndcItemSeparator=\:\::includenlogdata=true}' />
+        <target name='debug' type='Debug' layout='${log4jxmlevent:includeCallSite=true:includeSourceInfo=true:includeMdc=true:includeMdlc=true:includeMdlc=true:IncludeAllProperties=true:ndcItemSeparator=\:\::includenlogdata=true}' />
        </targets>
                 <rules>
                     <logger name='*' minlevel='Debug' writeTo='debug' />
@@ -62,12 +63,16 @@ namespace NLog.UnitTests.LayoutRenderers
             MappedDiagnosticsContext.Set("foo1", "bar1");
             MappedDiagnosticsContext.Set("foo2", "bar2");
 
+#if NET4_0 || NET4_5
+            MappedDiagnosticsLogicalContext.Clear();
+            MappedDiagnosticsLogicalContext.Set("foo3", "bar3");
+#endif
             NestedDiagnosticsContext.Push("baz1");
             NestedDiagnosticsContext.Push("baz2");
             NestedDiagnosticsContext.Push("baz3");
 
             ILogger logger = LogManager.GetLogger("A");
-            var logEventInfo = LogEventInfo.Create(LogLevel.Debug, "A", "some message");
+            var logEventInfo = LogEventInfo.Create(LogLevel.Debug, "A", new Exception("Hello Exception", new Exception("Goodbye Exception")), null, "some message");
             logEventInfo.Properties["nlogPropertyKey"] = "nlogPropertyValue";
             logger.Log(logEventInfo);
             string result = GetDebugLastMessage("debug");
@@ -118,6 +123,11 @@ namespace NLog.UnitTests.LayoutRenderers
                             case "properties":
                                 break;
 
+                            case "throwable":
+                                reader.Read();
+                                Assert.True(reader.Value.Contains("Hello Exception"));
+                                Assert.True(reader.Value.Contains("Goodbye Exception"));
+                                break;
                             case "data":
                                 string name = reader.GetAttribute("name");
                                 string value = reader.GetAttribute("value");
@@ -125,19 +135,11 @@ namespace NLog.UnitTests.LayoutRenderers
                                 switch (name)
                                 {
                                     case "log4japp":
-#if SILVERLIGHT
-                                        Assert.Equal("Silverlight Application", value);
-#else
                                         Assert.Equal(AppDomain.CurrentDomain.FriendlyName + "(" + Process.GetCurrentProcess().Id + ")", value);
-#endif
                                         break;
 
                                     case "log4jmachinename":
-#if !SILVERLIGHT
                                         Assert.Equal(Environment.MachineName, value);
-#else
-                                        Assert.Equal("silverlight", value);
-#endif
                                         break;
 
                                     case "foo1":
@@ -146,6 +148,16 @@ namespace NLog.UnitTests.LayoutRenderers
 
                                     case "foo2":
                                         Assert.Equal("bar2", value);
+                                        break;
+
+#if NET4_0 || NET4_5
+                                    case "foo3":
+                                        Assert.Equal("bar3", value);
+                                        break;
+#endif
+
+                                    case "nlogPropertyKey":
+                                        Assert.Equal("nlogPropertyValue", value);
                                         break;
 
                                     default:
@@ -187,6 +199,75 @@ namespace NLog.UnitTests.LayoutRenderers
                     }
                 }
             }
+        }
+
+        [Fact]
+        void BadXmlValueTest()
+        {
+            var sb = new System.Text.StringBuilder();
+
+            var forbidden = new System.Collections.Generic.HashSet<int>();
+            int start = 64976; int end = 65007;
+
+            for (int i = start; i <= end; i++)
+            {
+                forbidden.Add(i);
+            }
+
+            forbidden.Add(0xFFFE);
+            forbidden.Add(0xFFFF);
+
+            for (int i = char.MinValue; i <= char.MaxValue; i++)
+            {
+                char c = Convert.ToChar(i);
+                if (char.IsSurrogate(c))
+                {
+                    continue; // skip surrogates
+                }
+
+                if (forbidden.Contains(c))
+                {
+                    continue;
+                }
+
+                sb.Append(c);
+            }
+
+            var badString = sb.ToString();
+
+            var settings = new XmlWriterSettings
+            {
+                Indent = true,
+                ConformanceLevel = ConformanceLevel.Fragment,
+                IndentChars = "  ",
+            };
+
+            sb.Clear();
+            using (XmlWriter xtw = XmlWriter.Create(sb, settings))
+            {
+                xtw.WriteStartElement("log4j", "event", "http:://hello/");
+                xtw.WriteElementSafeString("log4j", "message", "http:://hello/", badString);
+                xtw.WriteEndElement();
+                xtw.Flush();
+            }
+
+            string goodString = null;
+            using (XmlReader reader = XmlReader.Create(new StringReader(sb.ToString())))
+            {
+                while (reader.Read())
+                {
+                    if (reader.NodeType == XmlNodeType.Text)
+                    {
+                        if (reader.Value.Contains("abc"))
+                            goodString = reader.Value;
+                    }
+                }
+            }
+
+            Assert.NotNull(goodString);
+            Assert.NotEqual(badString.Length, goodString.Length);
+            Assert.True(badString.Contains("abc"));
+            Assert.True(goodString.Contains("abc"));
         }
     }
 }

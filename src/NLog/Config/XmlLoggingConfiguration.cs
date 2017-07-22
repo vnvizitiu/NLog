@@ -31,6 +31,8 @@
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
 
+using JetBrains.Annotations;
+
 namespace NLog.Config
 {
     using System;
@@ -62,7 +64,10 @@ namespace NLog.Config
     /// 
     /// Parsing of the XML file is also implemented in this class.
     /// </summary>
-    ///<remarks>This class is thread-safe.<c>.ToList()</c> is used for that purpose.</remarks>
+    ///<remarks>
+    /// - This class is thread-safe.<c>.ToList()</c> is used for that purpose.
+    /// - Update TemplateXSD.xml for changes outside targets
+    /// </remarks>
     public class XmlLoggingConfiguration : LoggingConfiguration
     {
 #if __ANDROID__
@@ -78,7 +83,7 @@ namespace NLog.Config
         private readonly Dictionary<string, bool> fileMustAutoReloadLookup = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
 
         private string originalFileName;
-        
+
         private LogFactory logFactory = null;
 
         private ConfigurationItemFactory ConfigurationItemFactory
@@ -419,7 +424,7 @@ namespace NLog.Config
                     this.ParseTopLevel(content, null, autoReloadDefault: false);
                 }
                 InitializeSucceeded = true;
-
+                this.CheckParsingErrors(content);
                 this.CheckUnusedTargets();
 
             }
@@ -431,17 +436,40 @@ namespace NLog.Config
                     throw;
                 }
 
-                var configurationException = new NLogConfigurationException("Exception occurred when loading configuration from " + fileName, exception);
-                InternalLogger.Error(configurationException, "Error in Parsing Configuration File.");
+                var configurationException = new NLogConfigurationException(exception, "Exception when parsing {0}. ", fileName);
+                InternalLogger.Error(configurationException, "Parsing configuration from {0} failed.", fileName);
 
-                if (!ignoreErrors)
+                if (!ignoreErrors && configurationException.MustBeRethrown())
                 {
-                    if (configurationException.MustBeRethrown())
+                    throw configurationException;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Checks whether any error during XML configuration parsing has occured.
+        /// If there are any and <c>ThrowConfigExceptions</c> or <c>ThrowExceptions</c>
+        /// setting is enabled - throws <c>NLogConfigurationException</c>, otherwise
+        /// just write an internal log at Warn level.
+        /// </summary>
+        /// <param name="rootContentElement">Root NLog configuration xml element</param>
+        private void CheckParsingErrors(NLogXmlElement rootContentElement)
+        {
+            var parsingErrors = rootContentElement.GetParsingErrors().ToArray();
+            if (parsingErrors.Any())
+            {
+                if (LogManager.ThrowConfigExceptions ?? LogManager.ThrowExceptions)
+                {
+                    string exceptionMessage = string.Join(Environment.NewLine, parsingErrors);
+                    throw new NLogConfigurationException(exceptionMessage);
+                }
+                else
+                {
+                    foreach (var parsingError in parsingErrors)
                     {
-                        throw configurationException;
+                        InternalLogger.Log(LogLevel.Warn, parsingError);
                     }
                 }
-
             }
         }
 
@@ -480,6 +508,11 @@ namespace NLog.Config
             InternalLogger.Debug("Unused target checking is completed. Total Rule Count: {0}, Total Target Count: {1}, Unused Target Count: {2}", this.LoggingRules.Count, configuredNamedTargets.Count, unusedCount);
         }
 
+        /// <summary>
+        /// Add a file with configuration. Check if not already included.
+        /// </summary>
+        /// <param name="fileName"></param>
+        /// <param name="autoReloadDefault"></param>
         private void ConfigureFromFile(string fileName, bool autoReloadDefault)
         {
             if (!this.fileMustAutoReloadLookup.ContainsKey(GetFileLookupKey(fileName)))
@@ -557,6 +590,7 @@ namespace NLog.Config
 
             logFactory.ThrowExceptions = nlogElement.GetOptionalBooleanAttribute("throwExceptions", logFactory.ThrowExceptions);
             logFactory.ThrowConfigExceptions = nlogElement.GetOptionalBooleanAttribute("throwConfigExceptions", logFactory.ThrowConfigExceptions);
+            logFactory.KeepVariablesOnReload = nlogElement.GetOptionalBooleanAttribute("keepVariablesOnReload", logFactory.KeepVariablesOnReload);
             InternalLogger.LogToConsole = nlogElement.GetOptionalBooleanAttribute("internalLogToConsole", InternalLogger.LogToConsole);
             InternalLogger.LogToConsoleError = nlogElement.GetOptionalBooleanAttribute("internalLogToConsoleError", InternalLogger.LogToConsoleError);
             InternalLogger.LogFile = nlogElement.GetOptionalAttribute("internalLogFile", InternalLogger.LogFile);
@@ -575,6 +609,8 @@ namespace NLog.Config
             {
                 this.ParseExtensionsElement(extensionsChild, Path.GetDirectoryName(filePath));
             }
+
+            var rulesList = new List<NLogXmlElement>();
 
             //parse all other direct elements
             foreach (var child in children)
@@ -599,7 +635,8 @@ namespace NLog.Config
                         break;
 
                     case "RULES":
-                        this.ParseRulesElement(child, this.LoggingRules);
+                        //postpone parsing <rules> to the end
+                        rulesList.Add(child);
                         break;
 
                     case "TIME":
@@ -610,6 +647,12 @@ namespace NLog.Config
                         InternalLogger.Warn("Skipping unknown node: {0}", child.LocalName);
                         break;
                 }
+            }
+
+
+            foreach (var ruleChild in rulesList)
+            {
+                this.ParseRulesElement(ruleChild, this.LoggingRules);
             }
         }
 
@@ -802,14 +845,7 @@ namespace NLog.Config
                         }
 
                         Target newTarget = this.ConfigurationItemFactory.Targets.CreateInstance(typeAttributeVal);
-
-                        NLogXmlElement defaults;
-                        if (typeNameToDefaultTargetParameters.TryGetValue(typeAttributeVal, out defaults))
-                        {
-                            this.ParseTargetElement(newTarget, defaults);
-                        }
-
-                        this.ParseTargetElement(newTarget, targetElement);
+                        this.ParseTargetElement(newTarget, targetElement, typeNameToDefaultTargetParameters);
 
                         if (asyncWrap)
                         {
@@ -828,8 +864,15 @@ namespace NLog.Config
             }
         }
 
-        private void ParseTargetElement(Target target, NLogXmlElement targetElement)
+        private void ParseTargetElement(Target target, NLogXmlElement targetElement, Dictionary<string, NLogXmlElement> typeNameToDefaultTargetParameters = null)
         {
+            string targetType = StripOptionalNamespacePrefix(targetElement.GetRequiredAttribute("type"));
+            NLogXmlElement defaults;
+            if (typeNameToDefaultTargetParameters != null && typeNameToDefaultTargetParameters.TryGetValue(targetType, out defaults))
+            {
+                this.ParseTargetElement(target, defaults, null);
+            }
+
             var compound = target as CompoundTargetBase;
             var wrapper = target as WrapperTargetBase;
 
@@ -840,85 +883,99 @@ namespace NLog.Config
             {
                 string name = childElement.LocalName;
 
-                if (compound != null)
+                if (compound != null && ParseCompoundTarget(typeNameToDefaultTargetParameters, name, childElement, compound))
                 {
-                    if (IsTargetRefElement(name))
-                    {
-                        string targetName = childElement.GetRequiredAttribute("name");
-                        Target newTarget = this.FindTargetByName(targetName);
-                        if (newTarget == null)
-                        {
-                            throw new NLogConfigurationException("Referenced target '" + targetName + "' not found.");
-                        }
-
-                        compound.Targets.Add(newTarget);
-                        continue;
-                    }
-
-                    if (IsTargetElement(name))
-                    {
-                        string type = StripOptionalNamespacePrefix(childElement.GetRequiredAttribute("type"));
-
-                        Target newTarget = this.ConfigurationItemFactory.Targets.CreateInstance(type);
-                        if (newTarget != null)
-                        {
-                            this.ParseTargetElement(newTarget, childElement);
-                            if (newTarget.Name != null)
-                            {
-                                // if the new target has name, register it
-                                AddTarget(newTarget.Name, newTarget);
-                            }
-
-                            compound.Targets.Add(newTarget);
-                        }
-
-                        continue;
-                    }
+                    continue;
                 }
 
-                if (wrapper != null)
+                if (wrapper != null && ParseTargetWrapper(typeNameToDefaultTargetParameters, name, childElement, wrapper))
                 {
-                    if (IsTargetRefElement(name))
-                    {
-                        string targetName = childElement.GetRequiredAttribute("name");
-                        Target newTarget = this.FindTargetByName(targetName);
-                        if (newTarget == null)
-                        {
-                            throw new NLogConfigurationException("Referenced target '" + targetName + "' not found.");
-                        }
-
-                        wrapper.WrappedTarget = newTarget;
-                        continue;
-                    }
-
-                    if (IsTargetElement(name))
-                    {
-                        string type = StripOptionalNamespacePrefix(childElement.GetRequiredAttribute("type"));
-
-                        Target newTarget = this.ConfigurationItemFactory.Targets.CreateInstance(type);
-                        if (newTarget != null)
-                        {
-                            this.ParseTargetElement(newTarget, childElement);
-                            if (newTarget.Name != null)
-                            {
-                                // if the new target has name, register it
-                                AddTarget(newTarget.Name, newTarget);
-                            }
-
-                            if (wrapper.WrappedTarget != null)
-                            {
-                                throw new NLogConfigurationException("Wrapped target already defined.");
-                            }
-
-                            wrapper.WrappedTarget = newTarget;
-                        }
-
-                        continue;
-                    }
+                    continue;
                 }
 
                 this.SetPropertyFromElement(target, childElement);
             }
+        }
+
+        private bool ParseTargetWrapper(Dictionary<string, NLogXmlElement> typeNameToDefaultTargetParameters, string name, NLogXmlElement childElement, 
+            WrapperTargetBase wrapper)
+        {
+            if (IsTargetRefElement(name))
+            {
+                string targetName = childElement.GetRequiredAttribute("name");
+                Target newTarget = this.FindTargetByName(targetName);
+                if (newTarget == null)
+                {
+                    throw new NLogConfigurationException("Referenced target '" + targetName + "' not found.");
+                }
+
+                wrapper.WrappedTarget = newTarget;
+                return true;
+            }
+
+            if (IsTargetElement(name))
+            {
+                string type = StripOptionalNamespacePrefix(childElement.GetRequiredAttribute("type"));
+
+                Target newTarget = this.ConfigurationItemFactory.Targets.CreateInstance(type);
+                if (newTarget != null)
+                {
+                    this.ParseTargetElement(newTarget, childElement, typeNameToDefaultTargetParameters);
+                    if (newTarget.Name != null)
+                    {
+                        // if the new target has name, register it
+                        AddTarget(newTarget.Name, newTarget);
+                    }
+
+                    if (wrapper.WrappedTarget != null)
+                    {
+                        throw new NLogConfigurationException("Wrapped target already defined.");
+                    }
+
+                    wrapper.WrappedTarget = newTarget;
+                }
+
+                return true;
+            }
+            return false;
+        }
+
+        private bool ParseCompoundTarget(Dictionary<string, NLogXmlElement> typeNameToDefaultTargetParameters, string name, NLogXmlElement childElement, 
+            CompoundTargetBase compound)
+        {
+            if (IsTargetRefElement(name))
+            {
+                string targetName = childElement.GetRequiredAttribute("name");
+                Target newTarget = this.FindTargetByName(targetName);
+                if (newTarget == null)
+                {
+                    throw new NLogConfigurationException("Referenced target '" + targetName + "' not found.");
+                }
+
+                compound.Targets.Add(newTarget);
+                return true;
+            }
+
+            if (IsTargetElement(name))
+            {
+                string type = StripOptionalNamespacePrefix(childElement.GetRequiredAttribute("type"));
+
+                Target newTarget = this.ConfigurationItemFactory.Targets.CreateInstance(type);
+                if (newTarget != null)
+                {
+                    this.ParseTargetElement(newTarget, childElement, typeNameToDefaultTargetParameters);
+                    if (newTarget.Name != null)
+                    {
+                        // if the new target has name, register it
+                        AddTarget(newTarget.Name, newTarget);
+                    }
+
+                    compound.Targets.Add(newTarget);
+                }
+
+                return true;
+            }
+            return false;
         }
 
         [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Reliability", "CA2001:AvoidCallingProblematicMethods", MessageId = "System.Reflection.Assembly.LoadFrom", Justification = "Need to load external assembly.")]
@@ -964,75 +1021,85 @@ namespace NLog.Config
                 string assemblyFile = addElement.GetOptionalAttribute("assemblyFile", null);
                 if (assemblyFile != null)
                 {
-                    try
-                    {
-#if SILVERLIGHT && !WINDOWS_PHONE
-                    var si = Application.GetResourceStream(new Uri(assemblyFile, UriKind.Relative));
-                    var assemblyPart = new AssemblyPart();
-                    Assembly asm = assemblyPart.Load(si.Stream);
-#else
-                        string fullFileName = Path.Combine(baseDirectory, assemblyFile);
-                        InternalLogger.Info("Loading assembly file: {0}", fullFileName);
-
-                        Assembly asm = Assembly.LoadFrom(fullFileName);
-#endif
-                        this.ConfigurationItemFactory.RegisterItemsFromAssembly(asm, prefix);
-
-                    }
-                    catch (Exception exception)
-                    {
-                        if (exception.MustBeRethrownImmediately())
-                        {
-                            throw;
-                        }
-
-                        InternalLogger.Error(exception, "Error loading extensions.");
-                        NLogConfigurationException configException =
-                            new NLogConfigurationException("Error loading extensions: " + assemblyFile, exception);
-
-                        if (configException.MustBeRethrown())
-                        {
-                            throw configException;
-                        }
-                    }
-
+                    ParseExtensionWithAssemblyFle(baseDirectory, assemblyFile, prefix);
                     continue;
                 }
 
                 string assemblyName = addElement.GetOptionalAttribute("assembly", null);
                 if (assemblyName != null)
                 {
-                    try
-                    {
-                        InternalLogger.Info("Loading assembly name: {0}", assemblyName);
+                    ParseExtensionWithAssembly(assemblyName, prefix);
+                }
+            }
+        }
+
+        private void ParseExtensionWithAssembly(string assemblyName, string prefix)
+        {
+            try
+            {
+                InternalLogger.Info("Loading assembly name: {0}", assemblyName);
 #if SILVERLIGHT && !WINDOWS_PHONE
                     var si = Application.GetResourceStream(new Uri(assemblyName + ".dll", UriKind.Relative));
                     var assemblyPart = new AssemblyPart();
                     Assembly asm = assemblyPart.Load(si.Stream);
 #else
-                        Assembly asm = Assembly.Load(assemblyName);
+                Assembly asm = Assembly.Load(assemblyName);
 #endif
 
-                        this.ConfigurationItemFactory.RegisterItemsFromAssembly(asm, prefix);
-                    }
-                    catch (Exception exception)
-                    {
-                        if (exception.MustBeRethrownImmediately())
-                        {
-                            throw;
-                        }
+                this.ConfigurationItemFactory.RegisterItemsFromAssembly(asm, prefix);
+            }
+            catch (Exception exception)
+            {
+                if (exception.MustBeRethrownImmediately())
+                {
+                    throw;
+                }
 
-                        InternalLogger.Error(exception, "Error loading extensions.");
-                        NLogConfigurationException configException =
-                            new NLogConfigurationException("Error loading extensions: " + assemblyName, exception);
+                InternalLogger.Error(exception, "Error loading extensions.");
+                NLogConfigurationException configException =
+                    new NLogConfigurationException("Error loading extensions: " + assemblyName, exception);
 
-                        if (configException.MustBeRethrown())
-                        {
-                            throw configException;
-                        }
-                    }
+                if (configException.MustBeRethrown())
+                {
+                    throw configException;
                 }
             }
+        }
+
+        private void ParseExtensionWithAssemblyFle(string baseDirectory, string assemblyFile, string prefix)
+        {
+            try
+            {
+#if SILVERLIGHT && !WINDOWS_PHONE
+                    var si = Application.GetResourceStream(new Uri(assemblyFile, UriKind.Relative));
+                    var assemblyPart = new AssemblyPart();
+                    Assembly asm = assemblyPart.Load(si.Stream);
+#else
+                string fullFileName = Path.Combine(baseDirectory, assemblyFile);
+                InternalLogger.Info("Loading assembly file: {0}", fullFileName);
+
+                Assembly asm = Assembly.LoadFrom(fullFileName);
+#endif
+                this.ConfigurationItemFactory.RegisterItemsFromAssembly(asm, prefix);
+            }
+            catch (Exception exception)
+            {
+                if (exception.MustBeRethrownImmediately())
+                {
+                    throw;
+                }
+
+                InternalLogger.Error(exception, "Error loading extensions.");
+                NLogConfigurationException configException =
+                    new NLogConfigurationException("Error loading extensions: " + assemblyFile, exception);
+
+                if (configException.MustBeRethrown())
+                {
+                    throw configException;
+                }
+            }
+
+            return;
         }
 
         private void ParseIncludeElement(NLogXmlElement includeElement, string baseDirectory, bool autoReloadDefault)
@@ -1041,45 +1108,111 @@ namespace NLog.Config
 
             string newFileName = includeElement.GetRequiredAttribute("file");
 
+            var ignoreErrors = includeElement.GetOptionalBooleanAttribute("ignoreErrors", false);
+
             try
             {
                 newFileName = this.ExpandSimpleVariables(newFileName);
                 newFileName = SimpleLayout.Evaluate(newFileName);
+                var fullNewFileName = newFileName;
                 if (baseDirectory != null)
                 {
-                    newFileName = Path.Combine(baseDirectory, newFileName);
+                    fullNewFileName = Path.Combine(baseDirectory, newFileName);
                 }
 
-#if SILVERLIGHT
+#if SILVERLIGHT && !WINDOWS_PHONE
                 newFileName = newFileName.Replace("\\", "/");
-                if (Application.GetResourceStream(new Uri(newFileName, UriKind.Relative)) != null)
+                if (Application.GetResourceStream(new Uri(fullNewFileName, UriKind.Relative)) != null)
 #else
-                if (File.Exists(newFileName))
+                if (File.Exists(fullNewFileName))
 #endif
                 {
-                    InternalLogger.Debug("Including file '{0}'", newFileName);
-                    this.ConfigureFromFile(newFileName, autoReloadDefault);
+                    InternalLogger.Debug("Including file '{0}'", fullNewFileName);
+                    this.ConfigureFromFile(fullNewFileName, autoReloadDefault);
                 }
                 else
                 {
-                    throw new FileNotFoundException("Included file not found: " + newFileName);
+                    //is mask?
+
+                    if (newFileName.Contains("*"))
+                    {
+                        ConfigureFromFilesByMask(baseDirectory, newFileName, autoReloadDefault);
+                    }
+                    else
+                    {
+                        if (ignoreErrors)
+                        {
+                            //quick stop for performances
+                            InternalLogger.Debug("Skipping included file '{0}' as it can't be found", fullNewFileName);
+
+                            return;
+                        }
+
+                        throw new FileNotFoundException("Included file not found: " + fullNewFileName);
+                    }
+
                 }
             }
             catch (Exception exception)
             {
                 InternalLogger.Error(exception, "Error when including '{0}'.", newFileName);
 
+
+                if (ignoreErrors)
+                {
+                    return;
+                }
+
                 if (exception.MustBeRethrown())
                 {
                     throw;
                 }
 
-                if (includeElement.GetOptionalBooleanAttribute("ignoreErrors", false))
+
+
+                throw new NLogConfigurationException("Error when including: " + newFileName, exception);
+            }
+        }
+
+        /// <summary>
+        /// Include (multiple) files by filemask, e.g. *.nlog
+        /// </summary>
+        /// <param name="baseDirectory">base directory in case if <paramref name="fileMask"/> is relative</param>
+        /// <param name="fileMask">relative or absolute fileMask</param>
+        /// <param name="autoReloadDefault"></param>
+        private void ConfigureFromFilesByMask(string baseDirectory, string fileMask, bool autoReloadDefault)
+        {
+            var directory = baseDirectory;
+
+            //if absolute, split to filemask and directory.
+            if (Path.IsPathRooted(fileMask))
+            {
+                directory = Path.GetDirectoryName(fileMask);
+                if (directory == null)
                 {
+                    InternalLogger.Warn("directory is empty for include of '{0}'", fileMask);
                     return;
                 }
 
-                throw new NLogConfigurationException("Error when including: " + newFileName, exception);
+                var filename = Path.GetFileName(fileMask);
+
+                if (filename == null)
+                {
+                    InternalLogger.Warn("filename is empty for include of '{0}'", fileMask);
+                    return;
+                }
+                fileMask = filename;
+            }
+
+#if SILVERLIGHT && !WINDOWS_PHONE
+            var files = Directory.EnumerateFiles(directory, fileMask);
+#else
+            var files = Directory.GetFiles(directory, fileMask);
+#endif
+            foreach (var file in files)
+            {
+                //note we exclude ourself in ConfigureFromFile
+                this.ConfigureFromFile(file, autoReloadDefault);
             }
         }
 
@@ -1102,7 +1235,7 @@ namespace NLog.Config
         private static string GetFileLookupKey(string fileName)
         {
 
-#if SILVERLIGHT
+#if SILVERLIGHT && !WINDOWS_PHONE
             // file names are relative to XAP
             return fileName;
 #else
@@ -1126,8 +1259,17 @@ namespace NLog.Config
             {
                 return;
             }
+            var value = this.ExpandSimpleVariables(element.Value);
+            try
+            {
 
-            PropertyHelper.SetPropertyFromString(o, element.LocalName, this.ExpandSimpleVariables(element.Value), this.ConfigurationItemFactory);
+                PropertyHelper.SetPropertyFromString(o, element.LocalName, value, this.ConfigurationItemFactory);
+            }
+            catch (NLogConfigurationException)
+            {
+                InternalLogger.Warn("Error when setting '{0}' from '<{1}>'", element.LocalName, value);
+                throw;
+            }
         }
 
         private bool AddArrayItemFromElement(object o, NLogXmlElement element)
@@ -1171,8 +1313,16 @@ namespace NLog.Config
                 {
                     continue;
                 }
+                try
+                {
+                    PropertyHelper.SetPropertyFromString(targetObject, childName, this.ExpandSimpleVariables(childValue), this.ConfigurationItemFactory);
+                }
+                catch (NLogConfigurationException)
+                {
+                    InternalLogger.Warn("Error when setting '{0}' on attibute '{1}'", childValue, childName);
+                    throw;
+                }
 
-                PropertyHelper.SetPropertyFromString(targetObject, childName, this.ExpandSimpleVariables(childValue), this.ConfigurationItemFactory);
             }
         }
 

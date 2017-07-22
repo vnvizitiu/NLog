@@ -31,9 +31,6 @@
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
 
-using System.Collections.Generic;
-using System.Linq;
-
 namespace NLog.Layouts
 {
     using System;
@@ -56,9 +53,6 @@ namespace NLog.Layouts
     [AppDomainFixedOutput]
     public class SimpleLayout : Layout, IUsesStackTrace
     {
-        private const int MaxInitialRenderBufferLength = 16384;
-        private int maxRenderedLength;
-
         private string fixedText;
         private string layoutText;
         private ConfigurationItemFactory configurationItemFactory;
@@ -90,6 +84,7 @@ namespace NLog.Layouts
             this.configurationItemFactory = configurationItemFactory;
             this.Text = txt;
         }
+
         internal SimpleLayout(LayoutRenderer[] renderers, string text, ConfigurationItemFactory configurationItemFactory)
         {
             this.configurationItemFactory = configurationItemFactory;
@@ -120,7 +115,7 @@ namespace NLog.Layouts
                 string txt;
                 if (value == null)
                 {
-                    renderers = new LayoutRenderer[0];
+                    renderers = ArrayHelper.Empty<LayoutRenderer>();
                     txt = string.Empty;
                 }
                 else
@@ -156,12 +151,10 @@ namespace NLog.Layouts
         /// </summary>
         public ReadOnlyCollection<LayoutRenderer> Renderers { get; private set; }
 
-
         /// <summary>
         /// Gets the level of stack trace information required for rendering.
         /// </summary>
-        /// <remarks>Calculated when setting <see cref="Renderers"/>.</remarks>
-        public StackTraceUsage StackTraceUsage { get; private set; }
+        public new StackTraceUsage StackTraceUsage { get { return base.StackTraceUsage; } }
 
         /// <summary>
         /// Converts a text to a simple layout.
@@ -201,8 +194,8 @@ namespace NLog.Layouts
         /// values provided by the appropriate layout renderers.</returns>
         public static string Evaluate(string text, LogEventInfo logEvent)
         {
-            var l = new SimpleLayout(text);
-            return l.Render(logEvent);
+            var layout = new SimpleLayout(text);
+            return layout.Render(logEvent);
         }
 
         /// <summary>
@@ -232,24 +225,22 @@ namespace NLog.Layouts
         {
             this.Renderers = new ReadOnlyCollection<LayoutRenderer>(renderers);
 
-            if (this.Renderers.Count == 0)
-            {
-                //todo fixedText = null is also used if the text is fixed, but is a empty renderers not fixed?
-                this.fixedText = null;
-                this.StackTraceUsage = StackTraceUsage.None;
-            }
-            else if (this.Renderers.Count == 1 && this.Renderers[0] is LiteralLayoutRenderer)
+            if (this.Renderers.Count == 1 && this.Renderers[0] is LiteralLayoutRenderer)
             {
                 this.fixedText = ((LiteralLayoutRenderer)this.Renderers[0]).Text;
-                this.StackTraceUsage = StackTraceUsage.None;
             }
             else
             {
+                //todo fixedText = null is also used if the text is fixed, but is a empty renderers not fixed?
                 this.fixedText = null;
-                this.StackTraceUsage = this.Renderers.OfType<IUsesStackTrace>().DefaultIfEmpty().Max(usage => usage == null ? StackTraceUsage.None : usage.StackTraceUsage);
             }
 
             this.layoutText = text;
+
+            if (this.LoggingConfiguration != null)
+            {
+                PerformObjectScanning();
+            }
         }
 
         /// <summary>
@@ -297,21 +288,11 @@ namespace NLog.Layouts
                 return this.fixedText;
             }
 
-            string cachedValue;
+            return RenderAllocateBuilder(logEvent);
+        }
 
-            if (logEvent.TryGetCachedLayoutValue(this, out cachedValue))
-            {
-                return cachedValue;
-            }
-
-            int initialSize = this.maxRenderedLength;
-            if (initialSize > MaxInitialRenderBufferLength)
-            {
-                initialSize = MaxInitialRenderBufferLength;
-            }
-
-            var builder = new StringBuilder(initialSize);
-
+        private void RenderAllRenderers(LogEventInfo logEvent, StringBuilder target)
+        {
             //Memory profiling pointed out that using a foreach-loop was allocating
             //an Enumerator. Switching to a for-loop avoids the memory allocation.
             for (int i = 0; i < this.Renderers.Count; i++)
@@ -319,7 +300,7 @@ namespace NLog.Layouts
                 LayoutRenderer renderer = this.Renderers[i];
                 try
                 {
-                    renderer.Render(builder, logEvent);
+                    renderer.RenderAppendBuilder(logEvent, target);
                 }
                 catch (Exception exception)
                 {
@@ -337,17 +318,23 @@ namespace NLog.Layouts
                     }
                 }
             }
-
-            if (builder.Length > this.maxRenderedLength)
-            {
-                this.maxRenderedLength = builder.Length;
-            }
-
-            string value = builder.ToString();
-            logEvent.AddCachedLayoutValue(this, value);
-            return value;
         }
 
+        /// <summary>
+        /// Renders the layout for the specified logging event by invoking layout renderers
+        /// that make up the event.
+        /// </summary>
+        /// <param name="logEvent">The logging event.</param>
+        /// <param name="target">Initially empty <see cref="StringBuilder"/> for the result</param>
+        protected override void RenderFormattedMessage(LogEventInfo logEvent, StringBuilder target)
+        {
+            if (IsFixedText)
+            {
+                target.Append(this.fixedText);
+                return;
+            }
 
+            RenderAllRenderers(logEvent, target);
+        }
     }
 }

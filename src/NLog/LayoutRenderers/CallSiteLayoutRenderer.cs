@@ -58,6 +58,7 @@ namespace NLog.LayoutRenderers
             this.ClassName = true;
             this.MethodName = true;
             this.CleanNamesOfAnonymousDelegates = false;
+            this.IncludeNamespace = true;
 #if !SILVERLIGHT
             this.FileName = false;
             this.IncludeSourcePath = true;
@@ -70,6 +71,13 @@ namespace NLog.LayoutRenderers
         /// <docgen category='Rendering Options' order='10' />
         [DefaultValue(true)]
         public bool ClassName { get; set; }
+
+        /// <summary>
+        /// Gets or sets a value indicating whether to render the include the namespace with <see cref="ClassName"/>.
+        /// </summary>
+        /// <docgen category='Rendering Options' order='10' />
+        [DefaultValue(true)]
+        public bool IncludeNamespace { get; set; }
 
         /// <summary>
         /// Gets or sets a value indicating whether to render the method name.
@@ -138,84 +146,99 @@ namespace NLog.LayoutRenderers
                 MethodBase method = frame.GetMethod();
                 if (this.ClassName)
                 {
-                    if (method.DeclaringType != null)
-                    {
-                        string className = method.DeclaringType.FullName;
-
-                        if (this.CleanNamesOfAnonymousDelegates)
-                        {
-                            // NLog.UnitTests.LayoutRenderers.CallSiteTests+<>c__DisplayClassa
-                            int index = className.IndexOf("+<>", StringComparison.Ordinal);
-                            if (index >= 0)
-                            {
-                                className = className.Substring(0, index);
-                            }
-                        }
-
-                        builder.Append(className);
-                    }
-                    else
-                    {
-                        builder.Append("<no type>");
-                    }
+                    AppendClassName(builder, method);
                 }
 
                 if (this.MethodName)
                 {
-                    if (this.ClassName)
-                    {
-                        builder.Append(".");
-                    }
-
-                    if (method != null)
-                    {
-                        string methodName = method.Name;
-
-                        if (this.CleanNamesOfAnonymousDelegates)
-                        {
-                            // Clean up the function name if it is an anonymous delegate
-                            // <.ctor>b__0
-                            // <Main>b__2
-                            if (methodName.Contains("__") == true && methodName.StartsWith("<") == true && methodName.Contains(">") == true)
-                            {
-                                int startIndex = methodName.IndexOf('<') + 1;
-                                int endIndex = methodName.IndexOf('>');
-
-                                methodName = methodName.Substring(startIndex, endIndex - startIndex);
-                            }
-                        }
-
-                        builder.Append(methodName);
-                    }
-                    else
-                    {
-                        builder.Append("<no method>");
-                    }
+                    AppendMethodName(builder, method);
                 }
 
 #if !SILVERLIGHT
                 if (this.FileName)
                 {
-                    string fileName = frame.GetFileName();
-                    if (fileName != null)
-                    {
-                        builder.Append("(");
-                        if (this.IncludeSourcePath)
-                        {
-                            builder.Append(fileName);
-                        }
-                        else
-                        {
-                            builder.Append(Path.GetFileName(fileName));
-                        }
-
-                        builder.Append(":");
-                        builder.Append(frame.GetFileLineNumber());
-                        builder.Append(")");
-                    }
+                    AppendFileName(builder, frame);
                 }
 #endif
             }
         }
+
+        private void AppendClassName(StringBuilder builder, MethodBase method)
+        {
+            var type = method.DeclaringType;
+            if (type != null)
+            {
+                string className = IncludeNamespace ? type.FullName : type.Name;
+
+                if (this.CleanNamesOfAnonymousDelegates)
+                {
+                    // NLog.UnitTests.LayoutRenderers.CallSiteTests+<>c__DisplayClassa
+                    int index = className.IndexOf("+<>", StringComparison.Ordinal);
+                    if (index >= 0)
+                    {
+                        className = className.Substring(0, index);
+                    }
+                }
+
+                builder.Append(className);
+            }
+            else
+            {
+                builder.Append("<no type>");
+            }
+        }
+
+        private void AppendMethodName(StringBuilder builder, MethodBase method)
+        {
+            if (this.ClassName)
+            {
+                builder.Append(".");
+            }
+
+            if (method != null)
+            {
+                string methodName = method.Name;
+                // Clean up the function name if it is an anonymous delegate
+                // <.ctor>b__0
+                // <Main>b__2
+                if (this.CleanNamesOfAnonymousDelegates && (methodName.Contains("__") && methodName.StartsWith("<") && methodName.Contains(">")))
+                {
+                    int startIndex = methodName.IndexOf('<') + 1;
+                    int endIndex = methodName.IndexOf('>');
+
+                    methodName = methodName.Substring(startIndex, endIndex - startIndex);
+                }
+
+                builder.Append(methodName);
+            }
+            else
+            {
+                builder.Append("<no method>");
+            }
+        }
+
+#if !SILVERLIGHT
+        private void AppendFileName(StringBuilder builder, StackFrame frame)
+        {
+            string fileName = frame.GetFileName();
+            if (fileName != null)
+            {
+                builder.Append("(");
+                if (this.IncludeSourcePath)
+                {
+                    builder.Append(fileName);
+                }
+                else
+                {
+                    builder.Append(Path.GetFileName(fileName));
+                }
+
+                builder.Append(":");
+                builder.Append(frame.GetFileLineNumber());
+                builder.Append(")");
+            }
+        }
+#endif
+
     }
 }

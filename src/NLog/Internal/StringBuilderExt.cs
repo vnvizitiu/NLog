@@ -32,6 +32,7 @@
 // 
 
 using System;
+using System.IO;
 using System.Text;
 using NLog.Config;
 
@@ -70,7 +71,7 @@ namespace NLog.Internal
             if (value < 0)
             {
                 builder.Append('-');
-                uint uint_value = uint.MaxValue - ((uint)value) + 1; //< This is to deal with Int32.MinValue
+                uint uint_value = UInt32.MaxValue - ((uint)value) + 1; //< This is to deal with Int32.MinValue
                 AppendInvariant(builder, uint_value);
             }
             else
@@ -93,7 +94,7 @@ namespace NLog.Internal
                 builder.Append('0');
                 return;
             }
-            
+
             // Calculate length of integer when written out
             int length = 0;
             uint length_calc = value;
@@ -123,5 +124,74 @@ namespace NLog.Internal
             }
         }
         private static readonly char[] charToInt = new char[] { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9' };
+
+        /// <summary>
+        /// Clears the provider StringBuilder
+        /// </summary>
+        /// <param name="builder"></param>
+        public static void ClearBuilder(this StringBuilder builder)
+        {
+#if !SILVERLIGHT && !NET3_5
+            builder.Clear();
+#else
+            builder.Length = 0;
+#endif
+        }
+
+        /// <summary>
+        /// Copies the contents of the StringBuilder to the MemoryStream using the specified encoding (Without BOM/Preamble)
+        /// </summary>
+        /// <param name="builder">StringBuilder source</param>
+        /// <param name="ms">MemoryStream destination</param>
+        /// <param name="encoding">Encoding used for converter string into byte-stream</param>
+        /// <param name="transformBuffer">Helper char-buffer to minimize memory allocations</param>
+        public static void CopyToStream(this StringBuilder builder, MemoryStream ms, Encoding encoding, char[] transformBuffer)
+        {
+#if !SILVERLIGHT
+            if (transformBuffer != null)
+            {
+                for (int i = 0; i < builder.Length; i += transformBuffer.Length)
+                {
+                    int charCount = Math.Min(builder.Length - i, transformBuffer.Length);
+                    builder.CopyTo(i, transformBuffer, 0, charCount);
+                    int byteCount = encoding.GetByteCount(transformBuffer, 0, charCount);
+                    ms.SetLength(ms.Length + byteCount);
+                    encoding.GetBytes(transformBuffer, 0, charCount, ms.GetBuffer(), (int)ms.Position);
+                    ms.Position = ms.Length;
+                }
+            }
+            else
+#endif
+            {
+                // Faster than MemoryStream, but generates garbage
+                var str = builder.ToString();
+                byte[] bytes = encoding.GetBytes(str);
+                ms.Write(bytes, 0, bytes.Length);
+            }
+        }
+
+        /// <summary>
+        /// Append a number and pad with 0 to 2 digits
+        /// </summary>
+        /// <param name="builder">append to this</param>
+        /// <param name="number">the number</param>
+        internal static void Append2DigitsZeroPadded(this StringBuilder builder, int number)
+        {
+            builder.Append((char)((number / 10) + '0'));
+            builder.Append((char)((number % 10) + '0'));
+        }
+
+        /// <summary>
+        /// Append a number and pad with 0 to 4 digits
+        /// </summary>
+        /// <param name="builder">append to this</param>
+        /// <param name="number">the number</param>
+        internal static void Append4DigitsZeroPadded(this StringBuilder builder, int number)
+        {
+            builder.Append((char)(((number / 1000) % 10) + '0'));
+            builder.Append((char)(((number / 100) % 10) + '0'));
+            builder.Append((char)(((number / 10) % 10) + '0'));
+            builder.Append((char)(((number / 1) % 10) + '0'));
+        }
     }
 }

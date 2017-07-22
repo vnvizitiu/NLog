@@ -31,7 +31,7 @@
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
 
-#if !SILVERLIGHT && !MONO
+#if !SILVERLIGHT && !__IOS__ && !__ANDROID__ && !MONO
 
 namespace NLog.UnitTests.Targets.Wrappers
 {
@@ -49,7 +49,7 @@ namespace NLog.UnitTests.Targets.Wrappers
     {
         private const string NLogTestUser = "NLogTestUser";
         private const string NLogTestUserPassword = "BC@57acasd123";
-        private const string Localhost = "127.0.0.1";
+        private string Localhost = Environment.MachineName;
 
         public ImpersonatingTargetWrapperTests()
         {
@@ -284,7 +284,7 @@ namespace NLog.UnitTests.Targets.Wrappers
                 this.Events.Add(logEvent);
             }
 
-            protected override void Write(AsyncLogEventInfo[] logEvents)
+            protected override void Write(IList<AsyncLogEventInfo> logEvents)
             {
                 this.AssertExpectedUser();
                 base.Write(logEvents);

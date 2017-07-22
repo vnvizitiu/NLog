@@ -31,21 +31,18 @@
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
 
-using System.Linq;
-
 namespace NLog.Targets
 {
     using System;
     using System.ComponentModel;
-    using System.Globalization;
+    using System.Collections.Generic;
     using System.IO;
     using System.Net;
     using System.Text;
     using System.Xml;
     using NLog.Common;
     using NLog.Internal;
-    using NLog.Layouts;
-
+    using NLog.Config;
     /// <summary>
     /// Calls the specified web service on each log message.
     /// </summary>
@@ -73,8 +70,22 @@ namespace NLog.Targets
     [Target("WebService")]
     public sealed class WebServiceTarget : MethodCallTargetBase
     {
-        private const string SoapEnvelopeNamespace = "http://schemas.xmlsoap.org/soap/envelope/";
-        private const string Soap12EnvelopeNamespace = "http://www.w3.org/2003/05/soap-envelope";
+        private const string SoapEnvelopeNamespaceUri = "http://schemas.xmlsoap.org/soap/envelope/";
+        private const string Soap12EnvelopeNamespaceUri = "http://www.w3.org/2003/05/soap-envelope";
+
+        /// <summary>
+        /// dictionary that maps a concrete <see cref="HttpPostFormatterBase"/> implementation
+        /// to a specific <see cref="WebServiceProtocol"/>-value.
+        /// </summary>
+        private static Dictionary<WebServiceProtocol, Func<WebServiceTarget, HttpPostFormatterBase>> _postFormatterFactories =
+            new Dictionary<WebServiceProtocol, Func<WebServiceTarget, HttpPostFormatterBase>>()
+            {
+                { WebServiceProtocol.Soap11, t => new HttpPostSoap11Formatter(t)},
+                { WebServiceProtocol.Soap12, t => new HttpPostSoap12Formatter(t)},
+                { WebServiceProtocol.HttpPost, t => new HttpPostFormEncodedFormatter(t)},
+                { WebServiceProtocol.JsonPost, t => new HttpPostJsonFormatter(t)},
+                { WebServiceProtocol.XmlPost, t => new HttpPostXmlDocumentFormatter(t)},
+            };
 
         /// <summary>
         /// Initializes a new instance of the <see cref="WebServiceTarget" /> class.
@@ -87,6 +98,9 @@ namespace NLog.Targets
             const bool writeBOM = false;
             this.Encoding = new UTF8Encoding(writeBOM);
             this.IncludeBOM = writeBOM;
+            this.OptimizeBufferReuse = true;
+
+            this.Headers = new List<MethodCallParameter>();
         }
 
         /// <summary>
@@ -121,7 +135,8 @@ namespace NLog.Targets
         /// </summary>
         /// <docgen category='Web Service Options' order='10' />
         [DefaultValue("Soap11")]
-        public WebServiceProtocol Protocol { get; set; }
+        public WebServiceProtocol Protocol { get { return _activeProtocol.Key; } set { _activeProtocol = new KeyValuePair<WebServiceProtocol, HttpPostFormatterBase>(value, null); } }
+        private KeyValuePair<WebServiceProtocol, HttpPostFormatterBase> _activeProtocol = new KeyValuePair<WebServiceProtocol, HttpPostFormatterBase>();
 
         /// <summary>
         /// Should we include the BOM (Byte-order-mark) for UTF? Influences the <see cref="Encoding"/> property.
@@ -137,6 +152,54 @@ namespace NLog.Targets
         public Encoding Encoding { get; set; }
 
         /// <summary>
+        /// Gets or sets a value whether escaping be done according to Rfc3986 (Supports Internationalized Resource Identifiers - IRIs)
+        /// </summary>
+        /// <value>A value of <c>true</c> if Rfc3986; otherwise, <c>false</c> for legacy Rfc2396.</value>
+        /// <docgen category='Web Service Options' order='10' />
+        public bool EscapeDataRfc3986 { get; set; }
+
+        /// <summary>
+        /// Gets or sets a value whether escaping be done according to the old NLog style (Very non-standard)
+        /// </summary>
+        /// <value>A value of <c>true</c> if legacy encoding; otherwise, <c>false</c> for standard UTF8 encoding.</value>
+        /// <docgen category='Web Service Options' order='10' />
+        public bool EscapeDataNLogLegacy { get; set; }
+
+        /// <summary>
+        /// Gets or sets the name of the root XML element,
+        /// if POST of XML document chosen.
+        /// If so, this property must not be <c>null</c>.
+        /// (see <see cref="Protocol"/> and <see cref="WebServiceProtocol.XmlPost"/>).
+        /// </summary>
+        /// <docgen category='Web Service Options' order='10' />
+        public string XmlRoot { get; set; }
+
+        /// <summary>
+        /// Gets or sets the (optional) root namespace of the XML document,
+        /// if POST of XML document chosen.
+        /// (see <see cref="Protocol"/> and <see cref="WebServiceProtocol.XmlPost"/>).
+        /// </summary>
+        /// <docgen category='Web Service Options' order='10' />
+        public string XmlRootNamespace { get; set; }
+
+        /// <summary>
+        /// Gets the array of parameters to be passed.
+        /// </summary>
+        /// <docgen category='Web Service Options' order='10' />
+        [ArrayParameter(typeof(MethodCallParameter), "header")]
+        public IList<MethodCallParameter> Headers { get; private set; }
+
+#if !SILVERLIGHT
+        /// <summary>
+        /// Indicates whether to pre-authenticate the HttpWebRequest (Requires 'Authorization' in <see cref="Headers"/> parameters)
+        /// </summary>
+        /// <docgen category='Web Service Options' order='10' />
+        public bool PreAuthenticate { get; set; }
+#endif
+
+        private readonly AsyncOperationCounter pendingManualFlushList = new AsyncOperationCounter();
+
+        /// <summary>
         /// Calls the target method. Must be implemented in concrete classes.
         /// </summary>
         /// <param name="parameters">Method call parameters.</param>
@@ -146,18 +209,52 @@ namespace NLog.Targets
             throw new NotImplementedException();
         }
 
+        /// <summary>
+        /// Calls the target DoInvoke method, and handles AsyncContinuation callback
+        /// </summary>
+        /// <param name="parameters">Method call parameters.</param>
+        /// <param name="continuation">The continuation.</param>
+        protected override void DoInvoke(object[] parameters, AsyncContinuation continuation)
+        {
+            var request = (HttpWebRequest)WebRequest.Create(BuildWebServiceUrl(parameters));
+            DoInvoke(parameters, request, continuation);
+        }
 
         /// <summary>
         /// Invokes the web service method.
         /// </summary>
         /// <param name="parameters">Parameters to be passed.</param>
-        /// <param name="continuation">The continuation.</param>
-        protected override void DoInvoke(object[] parameters, AsyncContinuation continuation)
+        /// <param name="logEvent">The logging event.</param>
+        protected override void DoInvoke(object[] parameters, AsyncLogEventInfo logEvent)
         {
             var request = (HttpWebRequest)WebRequest.Create(BuildWebServiceUrl(parameters));
+
+            if (this.Headers != null && this.Headers.Count > 0)
+            {
+                for (int i = 0; i < this.Headers.Count; i++)
+                {
+                    string headerValue = base.RenderLogEvent(this.Headers[i].Layout, logEvent.LogEvent);
+                    if (headerValue == null)
+                        continue;
+
+                    request.Headers[this.Headers[i].Name] = headerValue;
+                }
+            }
+
+#if !SILVERLIGHT
+            if (this.PreAuthenticate)
+            {
+                request.PreAuthenticate = true;
+            }
+#endif
+
+            DoInvoke(parameters, request, logEvent.Continuation);
+        }
+
+        void DoInvoke(object[] parameters, HttpWebRequest request, AsyncContinuation continuation)
+        {
             Func<AsyncCallback, IAsyncResult> begin = (r) => request.BeginGetRequestStream(r, null);
             Func<IAsyncResult, Stream> getStream = request.EndGetRequestStream;
-
             DoInvoke(parameters, continuation, request, begin, getStream);
         }
 
@@ -166,23 +263,15 @@ namespace NLog.Targets
         {
             Stream postPayload = null;
 
-            switch (this.Protocol)
+            if (Protocol == WebServiceProtocol.HttpGet)
             {
-                case WebServiceProtocol.Soap11:
-                    postPayload = this.PrepareSoap11Request(request, parameters);
-                    break;
-
-                case WebServiceProtocol.Soap12:
-                    postPayload = this.PrepareSoap12Request(request, parameters);
-                    break;
-
-                case WebServiceProtocol.HttpGet:
-                    this.PrepareGetRequest(request);
-                    break;
-
-                case WebServiceProtocol.HttpPost:
-                    postPayload = this.PreparePostRequest(request, parameters);
-                    break;
+                PrepareGetRequest(request);
+            }
+            else
+            {
+                if (_activeProtocol.Value == null)
+                    _activeProtocol = new KeyValuePair<WebServiceProtocol, HttpPostFormatterBase>(this.Protocol, _postFormatterFactories[this.Protocol](this));
+                postPayload = _activeProtocol.Value.PrepareRequest(request, parameters);
             }
 
             AsyncContinuation sendContinuation =
@@ -190,71 +279,122 @@ namespace NLog.Targets
                 {
                     if (ex != null)
                     {
-                        continuation(ex);
+                        DoInvokeCompleted(continuation, ex);
                         return;
                     }
 
-                    request.BeginGetResponse(
-                        r =>
+                    try
+                    {
+                        request.BeginGetResponse(
+                            r =>
+                            {
+                                try
+                                {
+                                    using (var response = request.EndGetResponse(r))
+                                    {
+                                    }
+
+                                    DoInvokeCompleted(continuation, null);
+                                }
+                                catch (Exception ex2)
+                                {
+                                    InternalLogger.Error(ex2, "Error when sending to Webservice: {0}", this.Name);
+                                    if (ex2.MustBeRethrownImmediately())
+                                    {
+                                        throw;  // Throwing exceptions here will crash the entire application (.NET 2.0 behavior)
+                                    }
+
+                                    DoInvokeCompleted(continuation, ex2);
+                                }
+                            },
+                            null);
+                    }
+                    catch (Exception ex2)
+                    {
+                        InternalLogger.Error(ex2, "Error when sending to Webservice: {0}", this.Name);
+                        if (ex2.MustBeRethrown())
                         {
-                            try
-                            {
-                                using (var response = request.EndGetResponse(r))
-                                {
-                                }
+                            throw;
+                        }
 
-                                continuation(null);
-                            }
-                            catch (Exception ex2)
-                            {
-                                InternalLogger.Error(ex2, "Error when sending to Webservice.");
-
-                                if (ex2.MustBeRethrown())
-                                {
-                                    throw;
-                                }
-
-                                continuation(ex2);
-                            }
-                        },
-                        null);
+                        DoInvokeCompleted(continuation, ex2);
+                    }
                 };
 
             if (postPayload != null && postPayload.Length > 0)
             {
                 postPayload.Position = 0;
-                beginFunc(
-                    result =>
-                    {
-                        try
+                try
+                {
+                    pendingManualFlushList.BeginOperation();
+
+                    beginFunc(
+                        result =>
                         {
-                            using (Stream stream = getStreamFunc(result))
+                            try
                             {
-                                WriteStreamAndFixPreamble(postPayload, stream, this.IncludeBOM, this.Encoding);
+                                using (Stream stream = getStreamFunc(result))
+                                {
+                                    WriteStreamAndFixPreamble(postPayload, stream, this.IncludeBOM, this.Encoding);
+
+                                    postPayload.Dispose();
+                                }
+
+                                sendContinuation(null);
+                            }
+                            catch (Exception ex)
+                            {
+                                InternalLogger.Error(ex, "Error when sending to Webservice: {0}", this.Name);
+                                if (ex.MustBeRethrownImmediately())
+                                {
+                                    throw;  // Throwing exceptions here will crash the entire application (.NET 2.0 behavior)
+                                }
 
                                 postPayload.Dispose();
+                                DoInvokeCompleted(continuation, ex);
                             }
+                        });
+                }
+                catch (Exception ex)
+                {
+                    InternalLogger.Error(ex, "Error when sending to Webservice: {0}", this.Name);
+                    if (ex.MustBeRethrown())
+                    {
+                        throw;
+                    }
 
-                            sendContinuation(null);
-                        }
-                        catch (Exception ex)
-                        {
-                            postPayload.Dispose();
-                            InternalLogger.Error(ex, "Error when sending to Webservice.");
-
-                            if (ex.MustBeRethrown())
-                            {
-                                throw;
-                            }
-
-                            continuation(ex);
-                        }
-                    });
+                    DoInvokeCompleted(continuation, ex);
+                }
             }
             else
             {
+                pendingManualFlushList.BeginOperation();
                 sendContinuation(null);
             }
+        }
+
+        private void DoInvokeCompleted(AsyncContinuation continuation, Exception ex)
+        {
+            pendingManualFlushList.CompleteOperation(ex);
+            continuation(ex);
+        }
+
+        /// <summary>
+        /// Flush any pending log messages asynchronously (in case of asynchronous targets).
+        /// </summary>
+        /// <param name="asyncContinuation">The asynchronous continuation.</param>
+        protected override void FlushAsync(AsyncContinuation asyncContinuation)
+        {
+            pendingManualFlushList.RegisterCompletionNotification(asyncContinuation).Invoke(null);
+        }
+
+        /// <summary>
+        /// Closes the target.
+        /// </summary>
+        protected override void CloseTarget()
+        {
+            pendingManualFlushList.Clear();   // Maybe consider to wait a short while if pending requests?
+            base.CloseTarget();
         }
 
         /// <summary>
@@ -268,17 +408,22 @@ namespace NLog.Targets
             {
                 return this.Url;
             }
-            
+
             //if the protocol is HttpGet, we need to add the parameters to the query string of the url
-            var queryParameters = new StringBuilder();
-            string separator = string.Empty;
-            for (int i = 0; i < this.Parameters.Count; i++)
+            string queryParameters = string.Empty;
+            if (this.OptimizeBufferReuse)
             {
-                queryParameters.Append(separator);
-                queryParameters.Append(this.Parameters[i].Name);
-                queryParameters.Append("=");
-                queryParameters.Append(UrlHelper.UrlEncode(Convert.ToString(parameterValues[i], CultureInfo.InvariantCulture), false));
-                separator = "&";
+                using (var targetBuilder = this.ReusableLayoutBuilder.Allocate())
+                {
+                    BuildWebServiceQueryParameters(parameterValues, targetBuilder.Result);
+                    queryParameters = targetBuilder.Result.ToString();
+                }
+            }
+            else
+            {
+                StringBuilder sb = new StringBuilder();
+                BuildWebServiceQueryParameters(parameterValues, sb);
+                queryParameters = sb.ToString();
             }
 
             var builder = new UriBuilder(this.Url);
@@ -286,105 +431,39 @@ namespace NLog.Targets
             //the recommendations at https://msdn.microsoft.com/en-us/library/system.uribuilder.query.aspx
             if (builder.Query != null && builder.Query.Length > 1)
             {
-                builder.Query = builder.Query.Substring(1) + "&" + queryParameters.ToString();
+                builder.Query = string.Concat(builder.Query.Substring(1), "&", queryParameters);
             }
             else
             {
-                builder.Query = queryParameters.ToString();
+                builder.Query = queryParameters;
             }
 
             return builder.Uri;
         }
 
-        private MemoryStream PrepareSoap11Request(HttpWebRequest request, object[] parameterValues)
+        private void BuildWebServiceQueryParameters(object[] parameterValues, StringBuilder sb)
         {
-            string soapAction;
-            if (this.Namespace.EndsWith("/", StringComparison.Ordinal))
+            UrlHelper.EscapeEncodingFlag encodingFlags = UrlHelper.GetUriStringEncodingFlags(EscapeDataNLogLegacy, false, EscapeDataRfc3986);
+
+            string separator = string.Empty;
+            for (int i = 0; i < this.Parameters.Count; i++)
             {
-                soapAction = this.Namespace + this.MethodName;
+                sb.Append(separator);
+                sb.Append(this.Parameters[i].Name);
+                sb.Append("=");
+                string parameterValue = XmlHelper.XmlConvertToString(parameterValues[i]);
+                if (!string.IsNullOrEmpty(parameterValue))
+                {
+                    UrlHelper.EscapeDataEncode(parameterValue, sb, encodingFlags);
+                }
+                separator = "&";
             }
-            else
-            {
-                soapAction = this.Namespace + "/" + this.MethodName;
-            }
-            request.Headers["SOAPAction"] = soapAction;
-
-            return PrepareSoapRequestPost(request, parameterValues, SoapEnvelopeNamespace, "soap");
-
-        }
-
-        private MemoryStream PrepareSoap12Request(HttpWebRequest request, object[] parameterValues)
-        {
-            return PrepareSoapRequestPost(request, parameterValues, Soap12EnvelopeNamespace, "soap12");
-        }
-
-        /// <summary>
-        /// Helper for creating soap POST-XML request
-        /// </summary>
-        /// <param name="request"></param>
-        /// <param name="parameterValues"></param>
-        /// <param name="soapEnvelopeNamespace"></param>
-        /// <param name="soapname"></param>
-        /// <returns></returns>
-        private MemoryStream PrepareSoapRequestPost(WebRequest request, object[] parameterValues, string soapEnvelopeNamespace, string soapname)
-        {
-            request.Method = "POST";
-            request.ContentType = "text/xml; charset=" + this.Encoding.WebName;
-
-            var ms = new MemoryStream();
-            XmlWriter xtw = XmlWriter.Create(ms, new XmlWriterSettings { Encoding = this.Encoding });
-
-            xtw.WriteStartElement(soapname, "Envelope", soapEnvelopeNamespace);
-            xtw.WriteStartElement("Body", soapEnvelopeNamespace);
-            xtw.WriteStartElement(this.MethodName, this.Namespace);
-            int i = 0;
-            foreach (MethodCallParameter par in this.Parameters)
-            {
-                xtw.WriteElementString(par.Name, Convert.ToString(parameterValues[i], CultureInfo.InvariantCulture));
-                i++;
-            }
-
-            xtw.WriteEndElement(); // methodname
-            xtw.WriteEndElement(); // Body
-            xtw.WriteEndElement(); // soap:Envelope
-            xtw.Flush();
-
-            return ms;
-        }
-
-        private MemoryStream PreparePostRequest(HttpWebRequest request, object[] parameterValues)
-        {
-            request.Method = "POST";
-            return PrepareHttpRequest(request, parameterValues);
         }
 
         private void PrepareGetRequest(HttpWebRequest request)
         {
             request.Method = "GET";
         }
-
-        private MemoryStream PrepareHttpRequest(HttpWebRequest request, object[] parameterValues)
-        {
-            request.ContentType = "application/x-www-form-urlencoded; charset=" + this.Encoding.WebName;
-
-            var ms = new MemoryStream();
-            string separator = string.Empty;
-            var sw = new StreamWriter(ms, this.Encoding);
-            sw.Write(string.Empty);
-            int i = 0;
-            foreach (MethodCallParameter parameter in this.Parameters)
-            {
-                sw.Write(separator);
-                sw.Write(parameter.Name);
-                sw.Write("=");
-                sw.Write(UrlHelper.UrlEncode(Convert.ToString(parameterValues[i], CultureInfo.InvariantCulture), true));
-                separator = "&";
-                i++;
-            }
-            sw.Flush();
-            return ms;
-        }
-
 
         /// <summary>
         /// Write from input to output. Fix the UTF-8 bom
@@ -415,6 +494,294 @@ namespace NLog.Targets
 
         }
 
+        /// <summary>
+        /// base class for POST formatters, that
+        /// implement former <c>PrepareRequest()</c> method,
+        /// that creates the content for
+        /// the requested kind of HTTP request
+        /// </summary>
+        private abstract class HttpPostFormatterBase
+        {
+            protected HttpPostFormatterBase(WebServiceTarget target)
+            {
+                Target = target;
+            }
 
+            protected abstract string ContentType { get; }
+            protected WebServiceTarget Target { get; private set; }
+
+            public MemoryStream PrepareRequest(HttpWebRequest request, object[] parameterValues)
+            {
+                InitRequest(request);
+
+                var ms = new MemoryStream();
+                WriteContent(ms, parameterValues);
+                return ms;
+            }
+
+            protected virtual void InitRequest(HttpWebRequest request)
+            {
+                request.Method = "POST";
+                request.ContentType = string.Concat(ContentType, "; charset=", Target.Encoding.WebName);
+            }
+
+            protected abstract void WriteContent(MemoryStream ms, object[] parameterValues);
+        }
+
+        private class HttpPostFormEncodedFormatter : HttpPostTextFormatterBase
+        {
+            readonly UrlHelper.EscapeEncodingFlag _encodingFlags;
+
+            public HttpPostFormEncodedFormatter(WebServiceTarget target) : base(target)
+            {
+                _encodingFlags = UrlHelper.GetUriStringEncodingFlags(target.EscapeDataNLogLegacy, true, target.EscapeDataRfc3986);
+            }
+
+            protected override string ContentType
+            {
+                get { return "application/x-www-form-urlencoded"; }
+            }
+
+            protected override string Separator
+            {
+                get { return "&"; }
+            }
+
+            protected override void AppendFormattedParameter(StringBuilder builder, MethodCallParameter parameter, object value)
+            {
+                builder.Append(parameter.Name);
+                builder.Append('=');
+
+                string parameterValue = XmlHelper.XmlConvertToString(value);
+                if (!string.IsNullOrEmpty(parameterValue))
+                {
+                    UrlHelper.EscapeDataEncode(parameterValue, builder, _encodingFlags);
+                }
+            }
+        }
+
+        private class HttpPostJsonFormatter : HttpPostTextFormatterBase
+        {
+            private IJsonConverter JsonConverter
+            {
+                get { return _jsonConverter ?? (_jsonConverter = ConfigurationItemFactory.Default.JsonConverter); }
+            }
+            private IJsonConverter _jsonConverter = null;
+
+            public HttpPostJsonFormatter(WebServiceTarget target) : base(target)
+            {
+            }
+
+            protected override string ContentType
+            {
+                get { return "application/json"; }
+            }
+
+            protected override string Separator
+            {
+                get { return ","; }
+            }
+
+            protected override void BeginFormattedMessage(StringBuilder builder)
+            {
+                builder.Append('{');
+            }
+
+            protected override void EndFormattedMessage(StringBuilder builder)
+            {
+                builder.Append('}');
+            }
+
+            protected override void AppendFormattedParameter(StringBuilder builder, MethodCallParameter parameter, object value)
+            {
+                builder.Append('"');
+                builder.Append(parameter.Name);
+                builder.Append("\":");
+                JsonConverter.SerializeObject(value, builder);
+            }
+        }
+
+        private class HttpPostSoap11Formatter : HttpPostSoapFormatterBase
+        {
+            public HttpPostSoap11Formatter(WebServiceTarget target) : base(target)
+            {
+            }
+
+            protected override string SoapEnvelopeNamespace
+            {
+                get { return WebServiceTarget.SoapEnvelopeNamespaceUri; }
+            }
+
+            protected override string SoapName
+            {
+                get { return "soap"; }
+            }
+
+            protected override void InitRequest(HttpWebRequest request)
+            {
+                base.InitRequest(request);
+
+                string soapAction;
+                if (Target.Namespace.EndsWith("/", StringComparison.Ordinal))
+                {
+                    soapAction = string.Concat(Target.Namespace, Target.MethodName);
+                }
+                else
+                {
+                    soapAction = string.Concat(Target.Namespace, "/", Target.MethodName);
+                }
+
+                request.Headers["SOAPAction"] = soapAction;
+            }
+        }
+
+        private class HttpPostSoap12Formatter : HttpPostSoapFormatterBase
+        {
+            public HttpPostSoap12Formatter(WebServiceTarget target) : base(target)
+            {
+            }
+
+            protected override string SoapEnvelopeNamespace
+            {
+                get { return WebServiceTarget.Soap12EnvelopeNamespaceUri; }
+            }
+
+            protected override string SoapName
+            {
+                get { return "soap12"; }
+            }
+        }
+
+        private abstract class HttpPostSoapFormatterBase : HttpPostXmlFormatterBase
+        {
+            private readonly XmlWriterSettings _xmlWriterSettings;
+
+            protected HttpPostSoapFormatterBase(WebServiceTarget target) : base(target)
+            {
+                _xmlWriterSettings = new XmlWriterSettings { Encoding = target.Encoding };
+            }
+
+            protected abstract string SoapEnvelopeNamespace { get; }
+            protected abstract string SoapName { get; }
+
+            protected override void WriteContent(MemoryStream ms, object[] parameterValues)
+            {
+                XmlWriter xtw = XmlWriter.Create(ms, _xmlWriterSettings);
+
+                xtw.WriteStartElement(SoapName, "Envelope", SoapEnvelopeNamespace);
+                xtw.WriteStartElement("Body", SoapEnvelopeNamespace);
+                xtw.WriteStartElement(Target.MethodName, Target.Namespace);
+
+                WriteAllParametersToCurrenElement(xtw, parameterValues);
+
+                xtw.WriteEndElement(); // methodname
+                xtw.WriteEndElement(); // Body
+                xtw.WriteEndElement(); // soap:Envelope
+                xtw.Flush();
+            }
+        }
+
+        private abstract class HttpPostTextFormatterBase : HttpPostFormatterBase
+        {
+            readonly ReusableBuilderCreator _reusableStringBuilder = new ReusableBuilderCreator();
+            readonly ReusableBufferCreator _reusableEncodingBuffer = new ReusableBufferCreator(1024);
+            readonly byte[] _encodingPreamble;
+
+            protected HttpPostTextFormatterBase(WebServiceTarget target) : base(target)
+            {
+                _encodingPreamble = target.Encoding.GetPreamble();
+            }
+
+            protected abstract string Separator { get; }
+
+            protected virtual void BeginFormattedMessage(StringBuilder builder)
+            {
+            }
+
+            protected abstract void AppendFormattedParameter(StringBuilder builder, MethodCallParameter parameter, object value);
+
+            protected virtual void EndFormattedMessage(StringBuilder builder)
+            {
+            }
+
+            protected override void WriteContent(MemoryStream ms, object[] parameterValues)
+            {
+                lock (_reusableStringBuilder)
+                {
+                    using (var targetBuilder = _reusableStringBuilder.Allocate())
+                    {
+                        bool first = true;
+                        BeginFormattedMessage(targetBuilder.Result);
+                        for (int i = 0; i < Target.Parameters.Count; i++)
+                        {
+                            if (!first)
+                                targetBuilder.Result.Append(Separator);
+                            else
+                                first = false;
+                            AppendFormattedParameter(targetBuilder.Result, Target.Parameters[i], parameterValues[i]);
+                        }
+                        EndFormattedMessage(targetBuilder.Result);
+
+                        using (var transformBuffer = _reusableEncodingBuffer.Allocate())
+                        {
+                            if (_encodingPreamble.Length > 0)
+                                ms.Write(_encodingPreamble, 0, _encodingPreamble.Length);
+                            targetBuilder.Result.CopyToStream(ms, Target.Encoding, transformBuffer.Result);
+                        }
+                    }
+                }
+            }
+        }
+
+        private class HttpPostXmlDocumentFormatter : HttpPostXmlFormatterBase
+        {
+            private readonly XmlWriterSettings _xmlWriterSettings;
+
+            protected override string ContentType
+            {
+                get { return "application/xml"; }
+            }
+
+            public HttpPostXmlDocumentFormatter(WebServiceTarget target) : base(target)
+            {
+                if (string.IsNullOrEmpty(target.XmlRoot))
+                    throw new InvalidOperationException("WebServiceProtocol.Xml requires WebServiceTarget.XmlRoot to be set.");
+
+                _xmlWriterSettings = new XmlWriterSettings { Encoding = target.Encoding, OmitXmlDeclaration = true, Indent = false };
+            }
+
+            protected override void WriteContent(MemoryStream ms, object[] parameterValues)
+            {
+                XmlWriter xtw = XmlWriter.Create(ms, _xmlWriterSettings);
+
+                xtw.WriteStartElement(Target.XmlRoot, Target.XmlRootNamespace);
+
+                WriteAllParametersToCurrenElement(xtw, parameterValues);
+
+                xtw.WriteEndElement();
+                xtw.Flush();
+            }
+        }
+
+        private abstract class HttpPostXmlFormatterBase : HttpPostFormatterBase
+        {
+            protected HttpPostXmlFormatterBase(WebServiceTarget target) : base(target)
+            {
+            }
+
+            protected override string ContentType
+            {
+                get { return "text/xml"; }
+            }
+
+            protected void WriteAllParametersToCurrenElement(XmlWriter currentXmlWriter, object[] parameterValues)
+            {
+                for (int i = 0; i < Target.Parameters.Count; i++)
+                {
+                    string parameterValue = XmlHelper.XmlConvertToStringSafe(parameterValues[i]);
+                    currentXmlWriter.WriteElementString(Target.Parameters[i].Name, parameterValue);
+                }
+            }
+        }
     }
 }

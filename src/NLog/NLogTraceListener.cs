@@ -39,12 +39,9 @@ namespace NLog
     using System.Collections;
     using System.ComponentModel;
     using System.Diagnostics;
-    using System.Globalization;
     using System.Reflection;
     using System.Text;
     using System.Xml;
-    using NLog.Internal;
-    using NLog.Time;
 
     /// <summary>
     /// TraceListener which routes all messages through NLog.
@@ -189,6 +186,7 @@ namespace NLog
         /// </summary>
         public override void Close()
         {
+            //nothing to do in this case, but maybe in derived.
         }
 
         /// <summary>
@@ -211,7 +209,7 @@ namespace NLog
         }
 
         /// <summary>
-        /// Flushes the output buffer.
+        /// Flushes the output (if <see cref="DisableFlush"/> is not <c>true</c>) buffer with the default timeout of 15 seconds.
         /// </summary>
         public override void Flush()
         {
@@ -238,6 +236,9 @@ namespace NLog
         /// <param name="data">The trace data to emit.</param>
         public override void TraceData(TraceEventCache eventCache, string source, TraceEventType eventType, int id, object data)
         {
+            if (Filter != null && !Filter.ShouldTrace(eventCache, source, eventType, id, string.Empty, null, data, null))
+                return;
+
             this.TraceData(eventCache, source, eventType, id, new object[] { data });
         }
 
@@ -251,6 +252,9 @@ namespace NLog
         /// <param name="data">An array of objects to emit as data.</param>
         public override void TraceData(TraceEventCache eventCache, string source, TraceEventType eventType, int id, params object[] data)
         {
+            if (Filter != null && !Filter.ShouldTrace(eventCache, source, eventType, id, string.Empty, null, null, data))
+                return;
+
             var sb = new StringBuilder();
             for (int i = 0; i < data.Length; ++i)
             {
@@ -276,6 +280,9 @@ namespace NLog
         /// <param name="id">A numeric identifier for the event.</param>
         public override void TraceEvent(TraceEventCache eventCache, string source, TraceEventType eventType, int id)
         {
+            if (Filter != null && !Filter.ShouldTrace(eventCache, source, eventType, id, string.Empty, null, null, null))
+                return;
+
             this.ProcessLogEventInfo(TranslateLogLevel(eventType), source, string.Empty, null, id, eventType, null);
         }
 
@@ -290,6 +297,9 @@ namespace NLog
         /// <param name="args">An object array containing zero or more objects to format.</param>
         public override void TraceEvent(TraceEventCache eventCache, string source, TraceEventType eventType, int id, string format, params object[] args)
         {
+            if (Filter != null && !Filter.ShouldTrace(eventCache, source, eventType, id, format, args, null, null))
+                return;
+
             this.ProcessLogEventInfo(TranslateLogLevel(eventType), source, format, args, id, eventType, null);
         }
 
@@ -303,6 +313,9 @@ namespace NLog
         /// <param name="message">A message to write.</param>
         public override void TraceEvent(TraceEventCache eventCache, string source, TraceEventType eventType, int id, string message)
         {
+            if (Filter != null && !Filter.ShouldTrace(eventCache, source, eventType, id, message, null, null, null))
+                return;
+
             this.ProcessLogEventInfo(TranslateLogLevel(eventType), source, message, null, id, eventType, null);
         }
 
@@ -316,6 +329,9 @@ namespace NLog
         /// <param name="relatedActivityId">A <see cref="T:System.Guid"/>  object identifying a related activity.</param>
         public override void TraceTransfer(TraceEventCache eventCache, string source, int id, string message, Guid relatedActivityId)
         {
+            if (Filter != null && !Filter.ShouldTrace(eventCache, source, TraceEventType.Transfer, id, message, null, null, null))
+                return;
+
             this.ProcessLogEventInfo(LogLevel.Debug, source, message, null, id, TraceEventType.Transfer, relatedActivityId);
         }
 
@@ -371,19 +387,18 @@ namespace NLog
         /// </summary>
         protected virtual void ProcessLogEventInfo(LogLevel logLevel, string loggerName, [Localizable(false)] string message, object[] arguments, int? eventId, TraceEventType? eventType, Guid? relatedActiviyId)
         {
-            var ev = new LogEventInfo();
+            loggerName = (loggerName ?? this.Name) ?? string.Empty;
 
-            ev.LoggerName = (loggerName ?? this.Name) ?? string.Empty;
-            
+            StackTrace stackTrace = null;
+            int userFrameIndex = -1;
             if (this.AutoLoggerName)
             {
-                var stack = new StackTrace();
-                int userFrameIndex = -1;
+                stackTrace = new StackTrace();
                 MethodBase userMethod = null;
 
-                for (int i = 0; i < stack.FrameCount; ++i)
+                for (int i = 0; i < stackTrace.FrameCount; ++i)
                 {
-                    var frame = stack.GetFrame(i);
+                    var frame = stackTrace.GetFrame(i);
                     var method = frame.GetMethod();
 
                     if (method.DeclaringType == this.GetType())
@@ -392,7 +407,7 @@ namespace NLog
                         continue;
                     }
 
-                    if (method.DeclaringType.Assembly == systemAssembly)
+                    if (method.DeclaringType != null && method.DeclaringType.Assembly == systemAssembly)
                     {
                         // skip all methods from System.dll
                         continue;
@@ -405,14 +420,32 @@ namespace NLog
 
                 if (userFrameIndex >= 0)
                 {
-                    ev.SetStackTrace(stack, userFrameIndex);
-                    if (userMethod.DeclaringType != null)
+                    if (userMethod != null && userMethod.DeclaringType != null)
                     {
-                        ev.LoggerName = userMethod.DeclaringType.FullName;
+                        loggerName = userMethod.DeclaringType.FullName;
                     }
                 }
             }
 
+            ILogger logger;
+            if (this.LogFactory != null)
+            {
+                logger = this.LogFactory.GetLogger(loggerName);
+            }
+            else
+            {
+                logger = LogManager.GetLogger(loggerName);
+            }
+
+            logLevel = this.forceLogLevel ?? logLevel;
+            if (!logger.IsEnabled(logLevel))
+            {
+                return; // We are done
+            }
+
+            var ev = new LogEventInfo();
+            ev.LoggerName = loggerName;
+            ev.Level = logLevel;
             if (eventType.HasValue)
             {
                 ev.Properties.Add("EventType", eventType.Value);
@@ -423,7 +456,6 @@ namespace NLog
                 ev.Properties.Add("RelatedActivityID", relatedActiviyId.Value);
             }
 
-            ev.TimeStamp = TimeSource.Current.Time;
             ev.Message = message;
             ev.Parameters = arguments;
             ev.Level = this.forceLogLevel ?? logLevel;
@@ -433,14 +465,9 @@ namespace NLog
                 ev.Properties.Add("EventID", eventId.Value);
             }
 
-            ILogger logger;
-            if (this.LogFactory != null)
+            if (stackTrace != null && userFrameIndex >= 0)
             {
-                logger = this.LogFactory.GetLogger(ev.LoggerName);
-            }
-            else
-            {
-                logger = LogManager.GetLogger(ev.LoggerName);
+                ev.SetStackTrace(stackTrace, userFrameIndex);
             }
 
             logger.Log(ev);

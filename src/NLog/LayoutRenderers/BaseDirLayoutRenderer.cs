@@ -31,8 +31,6 @@
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
 
-#if !SILVERLIGHT
-
 namespace NLog.LayoutRenderers
 {
     using System;
@@ -47,14 +45,29 @@ namespace NLog.LayoutRenderers
     /// </summary>
     [LayoutRenderer("basedir")]
     [AppDomainFixedOutput]
+    [ThreadAgnostic]
     public class BaseDirLayoutRenderer : LayoutRenderer
     {
         private string baseDir;
 
+#if !SILVERLIGHT
+
+        /// <summary>
+        /// cached
+        /// </summary>
+        private string processDir;
+
+        /// <summary>
+        /// Use base dir of current process.
+        /// </summary>
+        public bool ProcessDir { get; set; }
+
+#endif
+
         /// <summary>
         /// Initializes a new instance of the <see cref="BaseDirLayoutRenderer" /> class.
         /// </summary>
-        public BaseDirLayoutRenderer() : this(AppDomainWrapper.CurrentDomain)
+        public BaseDirLayoutRenderer() : this(LogFactory.CurrentAppDomain)
         {
         }
 
@@ -85,10 +98,21 @@ namespace NLog.LayoutRenderers
         /// <param name="logEvent">Logging event.</param>
         protected override void Append(StringBuilder builder, LogEventInfo logEvent)
         {
-            var path = PathHelpers.CombinePaths(baseDir, this.Dir, this.File);
-            builder.Append(path);
+
+            var dir = baseDir;
+#if !SILVERLIGHT
+            if (ProcessDir)
+            {
+                dir = processDir ?? (processDir = Path.GetDirectoryName(System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName));
+            }
+#endif
+
+            if (dir != null)
+            {
+                var path = PathHelpers.CombinePaths(dir, this.Dir, this.File);
+                builder.Append(path);
+            }
         }
     }
 }
 
-#endif

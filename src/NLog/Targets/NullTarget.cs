@@ -72,6 +72,7 @@ namespace NLog.Targets
         /// </remarks>
         public NullTarget() : base()
         {
+            this.OptimizeBufferReuse = true;
         }
 
         /// <summary>
@@ -95,7 +96,7 @@ namespace NLog.Targets
         {
             if (this.FormatMessage)
             {
-                this.Layout.Render(logEvent);
+                this.RenderLogEvent(this.Layout, logEvent);
             }
         }
     }

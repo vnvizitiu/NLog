@@ -33,82 +33,186 @@
 
 namespace NLog.Internal
 {
+    using System;
     using System.Text;
 
     /// <summary>
     /// URL Encoding helper.
     /// </summary>
-    internal class UrlHelper
+    internal static class UrlHelper
     {
-        private static string safeUrlPunctuation = ".()*-_!'";
-        private static string hexChars = "0123456789abcdef";
+        [Flags]
+        public enum EscapeEncodingFlag
+        {
+            None = 0,
+            /// <summary>Allow UnreservedMarks instead of ReservedMarks, as specified by chosen RFC</summary>
+            UriString = 1,
+            /// <summary>Use RFC2396 standard (instead of RFC3986)</summary>
+            LegacyRfc2396 = 2,
+            /// <summary>Should use lowercase when doing HEX escaping of special characters</summary>
+            LowerCaseHex = 4,
+            /// <summary>Replace space ' ' with '+' instead of '%20'</summary>
+            SpaceAsPlus = 8,
+            /// <summary>Skip UTF8 encoding, and prefix special characters with '%u'</summary>
+            NLogLegacy = 16 | LegacyRfc2396 | LowerCaseHex | UriString,
+        };
 
         /// <summary>
-        /// Url encode and URL
+        /// Escape unicode string data for use in http-requests
         /// </summary>
-        /// <param name="str">URL to be encoded</param>
-        /// <param name="spaceAsPlus">space as + or %20? <c>false</c> (%20) is the safe option.</param>
-        /// <returns>Encoded url.</returns>
-        internal static string UrlEncode(string str, bool spaceAsPlus)
+        /// <param name="source">unicode string-data to be encoded</param>
+        /// <param name="target">target for the encoded result</param>
+        /// <param name="flags"><see cref="EscapeEncodingFlag"/>s for how to perform the encoding</param>
+        public static void EscapeDataEncode(string source, StringBuilder target, EscapeEncodingFlag flags)
         {
-            if (str == null) return string.Empty;
+            if (string.IsNullOrEmpty(source))
+                return;
 
-            StringBuilder result = new StringBuilder(str.Length + 20);
-            for (int i = 0; i < str.Length; ++i)
+          
+            bool isLowerCaseHex = (flags & EscapeEncodingFlag.LowerCaseHex) == EscapeEncodingFlag.LowerCaseHex;
+            bool isSpaceAsPlus = (flags & EscapeEncodingFlag.SpaceAsPlus) == EscapeEncodingFlag.SpaceAsPlus;
+            bool isNLogLegacy = (flags & EscapeEncodingFlag.NLogLegacy) == EscapeEncodingFlag.NLogLegacy;
+
+            char[] charArray = null;
+            byte[] byteArray = null;
+            char[] hexChars = isLowerCaseHex ? hexLowerChars : hexUpperChars;
+
+            for (int i = 0; i < source.Length; ++i)
             {
-                char ch = str[i];
+                char ch = source[i];
+                target.Append(ch);
+                if (IsSimpleCharOrNumber(ch))
+                    continue;
+               
+                if (isSpaceAsPlus && ch == ' ')
+                {
+                    target[target.Length - 1] = '+';
+                    continue;
+                }
 
-                if (ch == ' ' && spaceAsPlus)
+                if (IsAllowedChar(flags, ch))
                 {
-                    result.Append('+');
+                    continue;
                 }
-                else if (IsSafeUrlCharacter(ch))
+
+                if (isNLogLegacy)
                 {
-                    result.Append(ch);
+                    HandleLegacyEncoding(target, ch, hexChars);
+                    continue;
                 }
-                else if (ch < 256)
-                {
-                    result.Append('%');
-                    result.Append(hexChars[(ch >> 4) & 0xF]);
-                    result.Append(hexChars[(ch >> 0) & 0xF]);
-                }
-                else
-                {
-                    result.Append('%');
-                    result.Append('u');
-                    result.Append(hexChars[(ch >> 12) & 0xF]);
-                    result.Append(hexChars[(ch >> 8) & 0xF]);
-                    result.Append(hexChars[(ch >> 4) & 0xF]);
-                    result.Append(hexChars[(ch >> 0) & 0xF]);
-                }
+
+                if (charArray == null)
+                    charArray = new char[1];
+                charArray[0] = ch;
+
+                if (byteArray == null)
+                    byteArray = new byte[8];
+
+                
+                WriteWideChars(target, charArray, byteArray, hexChars);
             }
-
-            return result.ToString();
         }
 
         /// <summary>
-        /// Is this character safe in the URL?
+        /// Convert the wide-char into utf8-bytes, and then escape
         /// </summary>
-        /// <param name="ch">char to test.</param>
-        /// <returns><c>true</c> is safe.</returns>
-        private static bool IsSafeUrlCharacter(char ch)
+        /// <param name="target"></param>
+        /// <param name="charArray"></param>
+        /// <param name="byteArray"></param>
+        /// <param name="hexChars"></param>
+        private static void WriteWideChars(StringBuilder target, char[] charArray, byte[] byteArray, char[] hexChars)
         {
-            if (ch >= 'a' && ch <= 'z')
+            int byteCount = Encoding.UTF8.GetBytes(charArray, 0, 1, byteArray, 0);
+            for (int j = 0; j < byteCount; ++j)
             {
-                return true;
+                byte byteCh = byteArray[j];
+                if (j == 0)
+                    target[target.Length - 1] = '%';
+                else
+                    target.Append('%');
+                target.Append(hexChars[(byteCh & 0xf0) >> 4]);
+                target.Append(hexChars[byteCh & 0xf]);
             }
+        }
 
-            if (ch >= 'A' && ch <= 'Z')
+        private static void HandleLegacyEncoding(StringBuilder target, char ch, char[] hexChars)
+        {
+            if (ch < 256)
             {
-                return true;
+                target[target.Length - 1] = '%';
+                target.Append(hexChars[(ch >> 4) & 0xF]);
+                target.Append(hexChars[(ch >> 0) & 0xF]);
             }
-
-            if (ch >= '0' && ch <= '9')
+            else
             {
-                return true;
+                target[target.Length - 1] = '%';
+                target.Append('u');
+                target.Append(hexChars[(ch >> 12) & 0xF]);
+                target.Append(hexChars[(ch >> 8) & 0xF]);
+                target.Append(hexChars[(ch >> 4) & 0xF]);
+                target.Append(hexChars[(ch >> 0) & 0xF]);
             }
+        }
 
-            return safeUrlPunctuation.IndexOf(ch) >= 0;
+        /// <summary>
+        /// Is allowed?
+        /// </summary>
+        /// <param name="flags"></param>
+        /// <param name="ch"></param>
+        /// <returns></returns>
+        private static bool IsAllowedChar(EscapeEncodingFlag flags, char ch)
+        {
+            bool isUriString = (flags & EscapeEncodingFlag.UriString) == EscapeEncodingFlag.UriString;
+            bool isLegacyRfc2396 = (flags & EscapeEncodingFlag.LegacyRfc2396) == EscapeEncodingFlag.LegacyRfc2396;
+            if (isUriString)
+            {
+                if (!isLegacyRfc2396 && RFC3986UnreservedMarks.IndexOf(ch) >= 0)
+                    return true;
+                if (isLegacyRfc2396 && RFC2396UnreservedMarks.IndexOf(ch) >= 0)
+                    return true;
+            }
+            else
+            {
+                if (!isLegacyRfc2396 && RFC3986ReservedMarks.IndexOf(ch) >= 0)
+                    return true;
+                if (isLegacyRfc2396 && RFC2396ReservedMarks.IndexOf(ch) >= 0)
+                    return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Is a-z / A-Z / 0-9
+        /// </summary>
+        /// <param name="ch"></param>
+        /// <returns></returns>
+        private static bool IsSimpleCharOrNumber(char ch)
+        {
+            return ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z' || ch >= '0' && ch <= '9';
+        }
+
+        private const string RFC2396ReservedMarks = @";/?:@&=+$,";
+        private const string RFC3986ReservedMarks = @":/?#[]@!$&'()*+,;=";
+        private const string RFC2396UnreservedMarks = @"-_.!~*'()";
+        private const string RFC3986UnreservedMarks = @"-._~";
+
+        private static readonly char[] hexUpperChars =
+            { '0', '1', '2', '3', '4', '5', '6', '7',
+            '8', '9', 'A', 'B', 'C', 'D', 'E', 'F' };
+        private static readonly char[] hexLowerChars =
+            { '0', '1', '2', '3', '4', '5', '6', '7',
+            '8', '9', 'a', 'b', 'c', 'd', 'e', 'f' };
+
+        public static EscapeEncodingFlag GetUriStringEncodingFlags(bool escapeDataNLogLegacy, bool spaceAsPlus, bool escapeDataRfc3986)
+        {
+            EscapeEncodingFlag encodingFlags = EscapeEncodingFlag.UriString;
+            if (escapeDataNLogLegacy)
+                encodingFlags |= EscapeEncodingFlag.LowerCaseHex | EscapeEncodingFlag.NLogLegacy;
+            else if (!escapeDataRfc3986)
+                encodingFlags |= EscapeEncodingFlag.LowerCaseHex | EscapeEncodingFlag.LegacyRfc2396;
+            if (spaceAsPlus)
+                encodingFlags |= EscapeEncodingFlag.SpaceAsPlus;
+            return encodingFlags;
         }
     }
 }

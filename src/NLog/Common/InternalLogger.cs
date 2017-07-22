@@ -152,7 +152,10 @@ namespace NLog.Common
         /// </summary>
         public static bool IncludeTimestamp { get; set; }
 
-        internal static bool ExceptionThrowWhenWriting = false;
+        /// <summary>
+        /// Is there an <see cref="Exception"/> thrown when writing the message?
+        /// </summary>
+        internal static bool ExceptionThrowWhenWriting { get; private set; }
 
         /// <summary>
         /// Logs the specified message without an <see cref="Exception"/> at the specified level.
@@ -174,6 +177,36 @@ namespace NLog.Common
         public static void Log(LogLevel level, [Localizable(false)] string message)
         {
             Write(null, level, message, null);
+        }
+
+        /// <summary>
+        /// Logs the specified message without an <see cref="Exception"/> at the specified level. 
+        /// <paramref name="messageFunc"/> will be only called when logging is enabled for level <paramref name="level"/>.
+        /// </summary>
+        /// <param name="level">Log level.</param>
+        /// <param name="messageFunc">Function that returns the log message.</param>
+        public static void Log(LogLevel level, [Localizable(false)] Func<string> messageFunc)
+        {
+            if (level >= LogLevel)
+            {
+                Write(null, level, messageFunc(), null);
+            }
+        }
+
+        /// <summary>
+        /// Logs the specified message with an <see cref="Exception"/> at the specified level. 
+        /// <paramref name="messageFunc"/> will be only called when logging is enabled for level <paramref name="level"/>.
+        /// </summary>
+        /// <param name="ex">Exception to be logged.</param>
+        /// <param name="level">Log level.</param>
+        /// <param name="messageFunc">Function that returns the log message.</param>
+        [StringFormatMethod("message")]
+        public static void Log(Exception ex, LogLevel level, [Localizable(false)] Func<string> messageFunc)
+        {
+            if (level >= LogLevel)
+            {
+                Write(ex, level, messageFunc(), null);
+            }
         }
 
         /// <summary>
@@ -250,9 +283,12 @@ namespace NLog.Common
                 var logFile = LogFile;
                 if (!string.IsNullOrEmpty(logFile))
                 {
-                    using (var textWriter = File.AppendText(logFile))
+                    lock (LockObject)
                     {
-                        textWriter.WriteLine(msg);
+                        using (var textWriter = File.AppendText(logFile))
+                        {
+                            textWriter.WriteLine(msg);
+                        }
                     }
                 }
 
@@ -269,14 +305,21 @@ namespace NLog.Common
                 // log to console
                 if (LogToConsole)
                 {
-                    Console.WriteLine(msg);
+                    lock (LockObject)
+                    {
+                        Console.WriteLine(msg);
+                    }
                 }
 
                 // log to console error
                 if (LogToConsoleError)
                 {
-                    Console.Error.WriteLine(msg);
+                    lock (LockObject)
+                    {
+                        Console.Error.WriteLine(msg);
+                    }
                 }
+
 #if !SILVERLIGHT && !__IOS__ && !__ANDROID__
                 WriteToTrace(msg);
 #endif
@@ -290,7 +333,6 @@ namespace NLog.Common
                 {
                     throw;
                 }
-
             }
         }
 
@@ -343,7 +385,7 @@ namespace NLog.Common
             {
                 return;
             }
-            
+
             System.Diagnostics.Trace.WriteLine(message, "NLog");
         }
 

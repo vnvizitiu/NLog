@@ -60,7 +60,7 @@ namespace NLog.Targets
     [Target("LogReceiverService")]
     public class LogReceiverWebServiceTarget : Target
     {
-        private LogEventInfoBuffer buffer = new LogEventInfoBuffer(10000, false, 10000);
+        private readonly LogEventInfoBuffer buffer = new LogEventInfoBuffer(10000, false, 10000);
         private bool inCall;
 
         /// <summary>
@@ -148,7 +148,21 @@ namespace NLog.Targets
         /// <param name="logEvent">Logging event to be written out.</param>
         protected override void Write(AsyncLogEventInfo logEvent)
         {
-            this.Write(new[] { logEvent });
+            this.Write((IList<AsyncLogEventInfo>)new[] { logEvent });
+        }
+
+        /// <summary>
+        /// NOTE! Obsolete, instead override Write(IList{AsyncLogEventInfo} logEvents)
+        /// 
+        /// Writes an array of logging events to the log target. By default it iterates on all
+        /// events and passes them to "Write" method. Inheriting classes can use this method to
+        /// optimize batch writes.
+        /// </summary>
+        /// <param name="logEvents">Logging events to be written out.</param>
+        [Obsolete("Instead override Write(IList<AsyncLogEventInfo> logEvents. Marked obsolete on NLog 4.5")]
+        protected override void Write(AsyncLogEventInfo[] logEvents)
+        {
+            Write((IList<AsyncLogEventInfo>)logEvents);
         }
 
         /// <summary>
@@ -157,22 +171,26 @@ namespace NLog.Targets
         /// optimize batch writes.
         /// </summary>
         /// <param name="logEvents">Logging events to be written out.</param>
-        protected override void Write(AsyncLogEventInfo[] logEvents)
+        protected override void Write(IList<AsyncLogEventInfo> logEvents)
         {
             // if web service call is being processed, buffer new events and return
             // lock is being held here
             if (this.inCall)
             {
-                foreach (var ev in logEvents)
+                for (int i = 0; i < logEvents.Count; ++i)
                 {
-                    this.buffer.Append(ev);
+                    this.PrecalculateVolatileLayouts(logEvents[i].LogEvent);
+                    this.buffer.Append(logEvents[i]);
                 }
-
                 return;
             }
 
-            var networkLogEvents = this.TranslateLogEvents(logEvents);
-            this.Send(networkLogEvents, logEvents);
+            // OptimizeBufferReuse = true, will reuse the input-array on method-exit (so we make clone here)
+            AsyncLogEventInfo[] logEventsArray = new AsyncLogEventInfo[logEvents.Count];
+            logEvents.CopyTo(logEventsArray, 0);
+
+            var networkLogEvents = this.TranslateLogEvents(logEventsArray);
+            this.Send(networkLogEvents, logEventsArray, null);
         }
 
         /// <summary>
@@ -181,20 +199,7 @@ namespace NLog.Targets
         /// <param name="asyncContinuation">The asynchronous continuation.</param>
         protected override void FlushAsync(AsyncContinuation asyncContinuation)
         {
-            try
-            {
-                this.SendBufferedEvents();
-                asyncContinuation(null);
-            }
-            catch (Exception exception)
-            {
-                if (exception.MustBeRethrown())
-                {
-                    throw;
-                }
-
-                asyncContinuation(exception);
-            }
+            this.SendBufferedEvents(asyncContinuation);
         }
 
         private static int AddValueAndGetStringOrdinal(NLogEvents context, Dictionary<string, int> stringTable, string value)
@@ -211,9 +216,9 @@ namespace NLog.Targets
             return stringIndex;
         }
 
-        private NLogEvents TranslateLogEvents(AsyncLogEventInfo[] logEvents)
+        private NLogEvents TranslateLogEvents(IList<AsyncLogEventInfo> logEvents)
         {
-            if (logEvents.Length == 0 && !LogManager.ThrowExceptions)
+            if (logEvents.Count == 0 && !LogManager.ThrowExceptions)
             {
                 InternalLogger.Error("LogEvents array is empty, sending empty event...");
                 return new NLogEvents();
@@ -242,39 +247,46 @@ namespace NLog.Targets
 
             if (this.IncludeEventProperties)
             {
-                for (int i = 0; i < logEvents.Length; ++i)
+                for (int i = 0; i < logEvents.Count; ++i)
                 {
                     var ev = logEvents[i].LogEvent;
+                    this.MergeEventProperties(ev);
 
-                    // add all event-level property names in 'LayoutNames' collection.
-                    foreach (var prop in ev.Properties)
+                    if (ev.HasProperties)
                     {
-                        string propName = prop.Key as string;
-                        if (propName != null)
+                        // add all event-level property names in 'LayoutNames' collection.
+                        foreach (var prop in ev.Properties)
                         {
-                            if (!networkLogEvents.LayoutNames.Contains(propName))
+                            string propName = prop.Key as string;
+                            if (propName != null)
                             {
-                                networkLogEvents.LayoutNames.Add(propName);
+                                if (!networkLogEvents.LayoutNames.Contains(propName))
+                                {
+                                    networkLogEvents.LayoutNames.Add(propName);
+                                }
                             }
                         }
                     }
                 }
             }
 
-            networkLogEvents.Events = new NLogEvent[logEvents.Length];
-            for (int i = 0; i < logEvents.Length; ++i)
+            networkLogEvents.Events = new NLogEvent[logEvents.Count];
+            for (int i = 0; i < logEvents.Count; ++i)
             {
-                networkLogEvents.Events[i] = this.TranslateEvent(logEvents[i].LogEvent, networkLogEvents, stringTable);
+                AsyncLogEventInfo ev = logEvents[i];
+                networkLogEvents.Events[i] = this.TranslateEvent(ev.LogEvent, networkLogEvents, stringTable);
             }
 
             return networkLogEvents;
         }
 
         [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Reliability", "CA2000:Dispose objects before losing scope", Justification = "Client is disposed asynchronously.")]
-        private void Send(NLogEvents events, IEnumerable<AsyncLogEventInfo> asyncContinuations)
+        private void Send(NLogEvents events, IList<AsyncLogEventInfo> asyncContinuations, AsyncContinuation flushContinuations)
         {
             if (!this.OnSend(events, asyncContinuations))
             {
+                if (flushContinuations != null)
+                    flushContinuations(null);
                 return;
             }
 
@@ -282,19 +294,25 @@ namespace NLog.Targets
             var client = CreateLogReceiver();
 
             client.ProcessLogMessagesCompleted += (sender, e) =>
-                {
-                    // report error to the callers
-                    foreach (var ev in asyncContinuations)
-                    {
-                        ev.Continuation(e.Error);
-                    }
+            {
+                if (e.Error != null)
+                    InternalLogger.Error(e.Error, "Error in send for LogReceiver: {0}", this.Name);
 
-                    // send any buffered events
-                    this.SendBufferedEvents();
-                };
+                // report error to the callers
+                for (int i = 0; i < asyncContinuations.Count; ++i)
+                {
+                    asyncContinuations[i].Continuation(e.Error);
+                }
+
+                if (flushContinuations != null)
+                    flushContinuations(e.Error);
+
+                // send any buffered events
+                this.SendBufferedEvents(null);
+            };
 
             this.inCall = true;
-#if SILVERLIGHT 
+#if SILVERLIGHT
             if (!Deployment.Current.Dispatcher.CheckAccess())
             {
                 Deployment.Current.Dispatcher.BeginInvoke(() => client.ProcessLogMessagesAsync(events));
@@ -321,22 +339,26 @@ namespace NLog.Targets
                         }
                         catch (Exception ex)
                         {
-                            if (ex.MustBeRethrown())
+                            InternalLogger.Error(ex, "Error in send for LogReceiver: {0}", this.Name);
+                            if (ex.MustBeRethrownImmediately())
                             {
-                                throw;
+                                throw;  // Throwing exceptions here will crash the entire application (.NET 2.0 behavior)
                             }
 
                             exception = ex;
                         }
 
                         // report error to the callers
-                        foreach (var ev in asyncContinuations)
+                        for (int i = 0; i < asyncContinuations.Count; ++i)
                         {
-                            ev.Continuation(exception);
+                            asyncContinuations[i].Continuation(exception);
                         }
 
+                        if (flushContinuations != null)
+                            flushContinuations(exception);
+
                         // send any buffered events
-                        this.SendBufferedEvents();
+                        this.SendBufferedEvents(null);
                     },
                 null);
 #endif
@@ -349,8 +371,8 @@ namespace NLog.Targets
         /// Inheritors can override this method and provide their own 
         /// service configuration - binding and endpoint address
         /// </summary>
-        /// <returns></returns>
-        [Obsolete("Ths may be removed in a future release.  Use CreateLogReceiver.")]
+        /// <remarks>This method marked as obsolete before NLog 4.3.11 and it may be removed in a future release.</remarks>
+        [Obsolete("Use CreateLogReceiver instead. Marked obsolete before v4.3.11 and it may be removed in a future release.")]
         protected virtual WcfLogReceiverClient CreateWcfLogReceiverClient()
         {
             WcfLogReceiverClient client;
@@ -416,21 +438,45 @@ namespace NLog.Targets
         }
 #endif
 
-        private void SendBufferedEvents()
+        private void SendBufferedEvents(AsyncContinuation flushContinuation)
         {
-            lock (this.SyncRoot)
+            try
             {
-                // clear inCall flag
-                AsyncLogEventInfo[] bufferedEvents = this.buffer.GetEventsAndClear();
-                if (bufferedEvents.Length > 0)
+                lock (this.SyncRoot)
                 {
-                    var networkLogEvents = this.TranslateLogEvents(bufferedEvents);
-                    this.Send(networkLogEvents, bufferedEvents);
+                    // clear inCall flag
+                    AsyncLogEventInfo[] bufferedEvents = this.buffer.GetEventsAndClear();
+                    if (bufferedEvents.Length > 0)
+                    {
+                        var networkLogEvents = this.TranslateLogEvents(bufferedEvents);
+                        this.Send(networkLogEvents, bufferedEvents, flushContinuation);
+                    }
+                    else
+                    {
+                        // nothing in the buffer, clear in-call flag
+                        this.inCall = false;
+                        if (flushContinuation != null)
+                            flushContinuation(null);
+                    }
+                }
+            }
+            catch (Exception exception)
+            {
+                if (flushContinuation != null)
+                {
+                    InternalLogger.Error(exception, "Error in flush async for LogReceiver: {0}", this.Name);
+                    if (exception.MustBeRethrown())
+                        throw;
+
+                    flushContinuation(exception);
                 }
                 else
                 {
-                    // nothing in the buffer, clear in-call flag
-                    this.inCall = false;
+                    InternalLogger.Error(exception, "Error in send async for LogReceiver: {0}", this.Name);
+                    if (exception.MustBeRethrownImmediately())
+                    {
+                        throw;  // Throwing exceptions here will crash the entire application (.NET 2.0 behavior)
+                    }
                 }
             }
         }
@@ -459,7 +505,7 @@ namespace NLog.Targets
                 string value;
                 object propertyValue;
 
-                if (eventInfo.Properties.TryGetValue(context.LayoutNames[i], out propertyValue))
+                if (eventInfo.HasProperties && eventInfo.Properties.TryGetValue(context.LayoutNames[i], out propertyValue))
                 {
                     value = Convert.ToString(propertyValue, CultureInfo.InvariantCulture);
                 }

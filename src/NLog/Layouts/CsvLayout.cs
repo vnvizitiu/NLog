@@ -162,141 +162,106 @@ namespace NLog.Layouts
         /// <returns>A string representation of the log event.</returns>
         protected override string GetFormattedMessage(LogEventInfo logEvent)
         {
-            string cachedValue;
+            return RenderAllocateBuilder(logEvent);
+        }
 
-            if (logEvent.TryGetCachedLayoutValue(this, out cachedValue))
-            {
-                return cachedValue;
-            }
-
-            var sb = new StringBuilder();
-
+        private void RenderAllColumns(LogEventInfo logEvent, StringBuilder sb)
+        {
             //Memory profiling pointed out that using a foreach-loop was allocating
             //an Enumerator. Switching to a for-loop avoids the memory allocation.
             for (int i = 0; i < this.Columns.Count; i++)
             {
                 CsvColumn col = this.Columns[i];
-                if (i != 0)
-                {
-                    sb.Append(this.actualColumnDelimiter);
-                }
-
-                bool useQuoting;
                 string text = col.Layout.Render(logEvent);
 
-                switch (this.Quoting)
-                {
-                    case CsvQuotingMode.Nothing:
-                        useQuoting = false;
-                        break;
-
-                    case CsvQuotingMode.All:
-                        useQuoting = true;
-                        break;
-
-                    default:
-                    case CsvQuotingMode.Auto:
-                        if (text.IndexOfAny(this.quotableCharacters) >= 0)
-                        {
-                            useQuoting = true;
-                        }
-                        else
-                        {
-                            useQuoting = false;
-                        }
-
-                        break;
-                }
-
-                if (useQuoting)
-                {
-                    sb.Append(this.QuoteChar);
-                }
-
-                if (useQuoting)
-                {
-                    sb.Append(text.Replace(this.QuoteChar, this.doubleQuoteChar));
-                }
-                else
-                {
-                    sb.Append(text);
-                }
-
-                if (useQuoting)
-                {
-                    sb.Append(this.QuoteChar);
-                }
+                RenderCol(sb, i, text);
             }
+        }
 
-            return logEvent.AddCachedLayoutValue(this, sb.ToString());
+        /// <summary>
+        /// Formats the log event for write.
+        /// </summary>
+        /// <param name="logEvent">The logging event.</param>
+        /// <param name="target">Initially empty <see cref="StringBuilder"/> for the result</param>
+        protected override void RenderFormattedMessage(LogEventInfo logEvent, StringBuilder target)
+        {
+            RenderAllColumns(logEvent, target);
         }
 
         /// <summary>
         /// Get the headers with the column names.
         /// </summary>
         /// <returns></returns>
-        private string GetHeader()
+        private void RenderHeader(StringBuilder sb)
         {
-            var sb = new StringBuilder();
-
             //Memory profiling pointed out that using a foreach-loop was allocating
             //an Enumerator. Switching to a for-loop avoids the memory allocation.
             for (int i = 0; i < this.Columns.Count; i++)
             {
                 CsvColumn col = this.Columns[i];
-                if (i != 0)
-                {
-                    sb.Append(this.actualColumnDelimiter);
-                }
-
-                bool useQuoting;
                 string text = col.Name;
 
-                switch (this.Quoting)
-                {
-                    case CsvQuotingMode.Nothing:
-                        useQuoting = false;
-                        break;
+                RenderCol(sb, i, text);
+            }
+        }
 
-                    case CsvQuotingMode.All:
-                        useQuoting = true;
-                        break;
-
-                    default:
-                    case CsvQuotingMode.Auto:
-                        if (text.IndexOfAny(this.quotableCharacters) >= 0)
-                        {
-                            useQuoting = true;
-                        }
-                        else
-                        {
-                            useQuoting = false;
-                        }
-
-                        break;
-                }
-
-                if (useQuoting)
-                {
-                    sb.Append(this.QuoteChar);
-                }
-
-                if (useQuoting)
-                {
-                    sb.Append(text.Replace(this.QuoteChar, this.doubleQuoteChar));
-                }
-                else
-                {
-                    sb.Append(text);
-                }
-
-                if (useQuoting)
-                {
-                    sb.Append(this.QuoteChar);
-                }
+        /// <summary>
+        /// Render 1 columnvalue (text or header) to <paramref name="sb"/>
+        /// </summary>
+        /// <param name="sb">write-to</param>
+        /// <param name="columnIndex">current col index</param>
+        /// <param name="columnValue">col text</param>
+        private void RenderCol(StringBuilder sb, int columnIndex, string columnValue)
+        {
+            if (columnIndex != 0)
+            {
+                sb.Append(this.actualColumnDelimiter);
             }
 
-            return sb.ToString();
+            bool useQuoting;
+
+            switch (this.Quoting)
+            {
+                case CsvQuotingMode.Nothing:
+                    useQuoting = false;
+                    break;
+
+                case CsvQuotingMode.All:
+                    useQuoting = true;
+                    break;
+
+                default:
+                case CsvQuotingMode.Auto:
+                    if (columnValue.IndexOfAny(this.quotableCharacters) >= 0)
+                    {
+                        useQuoting = true;
+                    }
+                    else
+                    {
+                        useQuoting = false;
+                    }
+
+                    break;
+            }
+
+            if (useQuoting)
+            {
+                sb.Append(this.QuoteChar);
+            }
+
+            if (useQuoting)
+            {
+                sb.Append(columnValue.Replace(this.QuoteChar, this.doubleQuoteChar));
+            }
+            else
+            {
+                sb.Append(columnValue);
+            }
+
+            if (useQuoting)
+            {
+                sb.Append(this.QuoteChar);
+            }
         }
 
         /// <summary>
@@ -323,14 +288,17 @@ namespace NLog.Layouts
             /// <returns>The rendered layout.</returns>
             protected override string GetFormattedMessage(LogEventInfo logEvent)
             {
-                string cached;
+                return RenderAllocateBuilder(logEvent);
+            }
 
-                if (logEvent.TryGetCachedLayoutValue(this, out cached))
-                {
-                    return cached;
-                }
-
-                return logEvent.AddCachedLayoutValue(this, this.parent.GetHeader());
+            /// <summary>
+            /// Renders the layout for the specified logging event by invoking layout renderers.
+            /// </summary>
+            /// <param name="logEvent">The logging event.</param>
+            /// <param name="target">Initially empty <see cref="StringBuilder"/> for the result</param>
+            protected override void RenderFormattedMessage(LogEventInfo logEvent, StringBuilder target)
+            {
+                this.parent.RenderHeader(target);
             }
         }
     }

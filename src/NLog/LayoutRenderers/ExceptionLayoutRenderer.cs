@@ -31,12 +31,13 @@
 // THE POSSIBILITY OF SUCH DAMAGE.
 // 
 
+using NLog.Conditions;
+
 namespace NLog.LayoutRenderers
 {
     using System;
     using System.Collections.Generic;
     using System.ComponentModel;
-    using System.Globalization;
     using System.Text;
     using NLog.Common;
     using NLog.Config;
@@ -188,7 +189,8 @@ namespace NLog.LayoutRenderers
         /// <param name="logEvent">Logging event.</param>
         protected override void Append(StringBuilder builder, LogEventInfo logEvent)
         {
-            if (logEvent.Exception != null)
+            Exception primaryException = logEvent.Exception;
+            if (primaryException != null)
             {
                 var sb2 = new StringBuilder(128);
                 string separator = string.Empty;
@@ -198,42 +200,78 @@ namespace NLog.LayoutRenderers
                     sb2.Append(separator);
 
                     var currentRenderFunction = _renderingfunctions[renderingFormat];
-
-                    if (logEvent.Exception != null)
-                    {
-                        currentRenderFunction(sb2, logEvent.Exception);
-                    }
-                    else
-                    {
-                        InternalLogger.Debug("Skipping rendering exception as exception is null");
-                    }
-
+                    currentRenderFunction(sb2, primaryException);
                     separator = this.Separator;
                 }
-                Exception currentException = logEvent.Exception.InnerException;
+
+                Exception currentException = primaryException.InnerException;
                 int currentLevel = 0;
                 while (currentException != null && currentLevel < this.MaxInnerExceptionLevel)
                 {
-                    // separate inner exceptions
-                    sb2.Append(this.InnerExceptionSeparator);
-
-                    separator = string.Empty;
-                    foreach (ExceptionRenderingFormat renderingFormat in this.InnerFormats ?? this.Formats)
-                    {
-                        sb2.Append(separator);
-
-                        var currentRenderFunction = _renderingfunctions[renderingFormat];
-
-                        currentRenderFunction(sb2, currentException);
-
-                        separator = this.Separator;
-                    }
+                    AppendInnerException(sb2, currentException);
 
                     currentException = currentException.InnerException;
                     currentLevel++;
                 }
 
+#if !NET3_5 && !SILVERLIGHT4
+                AggregateException asyncException = primaryException as AggregateException;
+                if (asyncException != null)
+                {
+                    AppendAggregateException(primaryException, currentLevel, sb2, asyncException);
+                }
+#endif
                 builder.Append(sb2.ToString());
+            }
+        }
+#if !NET3_5 && !SILVERLIGHT4
+        private void AppendAggregateException(Exception primaryException, int currentLevel, StringBuilder builder, AggregateException asyncException)
+        {
+            asyncException = asyncException.Flatten();
+            if (asyncException.InnerExceptions != null)
+            {
+                for (int i = 0; i < asyncException.InnerExceptions.Count && currentLevel < this.MaxInnerExceptionLevel; i++, currentLevel++)
+                {
+                    var currentException = asyncException.InnerExceptions[i];
+                    if (ReferenceEquals(currentException, primaryException.InnerException))
+                        continue; // Skip firstException when it is innerException
+
+                    if (currentException == null)
+                    {
+                        InternalLogger.Debug("Skipping rendering exception as exception is null");
+                        continue;
+                    }
+
+                    AppendInnerException(builder, currentException);
+                    currentLevel++;
+
+                    currentException = currentException.InnerException;
+                    while (currentException != null && currentLevel < this.MaxInnerExceptionLevel)
+                    {
+                        AppendInnerException(builder, currentException);
+
+                        currentException = currentException.InnerException;
+                        currentLevel++;
+                    }
+                }
+            }
+        }
+#endif
+        private void AppendInnerException(StringBuilder sb2, Exception currentException)
+        {
+            // separate inner exceptions
+            sb2.Append(this.InnerExceptionSeparator);
+
+            string separator = string.Empty;
+            foreach (ExceptionRenderingFormat renderingFormat in this.InnerFormats ?? this.Formats)
+            {
+                sb2.Append(separator);
+
+                var currentRenderFunction = _renderingfunctions[renderingFormat];
+
+                currentRenderFunction(sb2, currentException);
+
+                separator = this.Separator;
             }
         }
 
@@ -251,12 +289,9 @@ namespace NLog.LayoutRenderers
             catch (Exception exception)
             {
                 var message = string.Format("Exception in {0}.AppendMessage(): {1}.", typeof(ExceptionLayoutRenderer).FullName, exception.GetType().FullName);
-                sb.Append("NLog message:" + message);
-
-                if (InternalLogger.IsWarnEnabled)
-                {
-                    InternalLogger.Warn(message);
-                }
+                sb.Append("NLog message: ");
+                sb.Append(message);
+                InternalLogger.Warn(exception, message);
             }
         }
 
@@ -284,7 +319,8 @@ namespace NLog.LayoutRenderers
         /// <param name="ex">The Exception whose stack trace should be appended.</param>        
         protected virtual void AppendStackTrace(StringBuilder sb, Exception ex)
         {
-            sb.Append(ex.StackTrace);
+            if (!string.IsNullOrEmpty(ex.StackTrace))
+                sb.Append(ex.StackTrace);
         }
 
         /// <summary>
@@ -324,13 +360,16 @@ namespace NLog.LayoutRenderers
         /// <param name="ex">The Exception whose Data property elements should be appended.</param>
         protected virtual void AppendData(StringBuilder sb, Exception ex)
         {
-            string separator = string.Empty;
-            foreach (var key in ex.Data.Keys)
+            if (ex.Data != null && ex.Data.Count > 0)
             {
-                sb.Append(separator);
-                sb.AppendFormat("{0}: {1}", key, ex.Data[key]);
+                string separator = string.Empty;
+                foreach (var key in ex.Data.Keys)
+                {
+                    sb.Append(separator);
+                    sb.AppendFormat("{0}: {1}", key, ex.Data[key]);
 
-                separator = ExceptionDataSeparator;
+                    separator = ExceptionDataSeparator;
+                }
             }
         }
 
@@ -366,6 +405,9 @@ namespace NLog.LayoutRenderers
         /// <returns></returns>
         protected static string ParseMethodNameFromStackTrace(string stackTrace)
         {
+            if (string.IsNullOrEmpty(stackTrace))
+                return string.Empty;
+
             // get the first line of the stack trace
             string stackFrameLine;
 

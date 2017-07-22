@@ -57,8 +57,6 @@ namespace NLog
 
         private static int globalSequenceId;
 
-        private readonly object layoutCacheLock = new object();
-
         private string formattedMessage;
         private string message;
         private object[] parameters;
@@ -183,9 +181,11 @@ namespace NLog
         /// <summary>
         /// Gets the logger short name.
         /// </summary>
-        [Obsolete("This property should not be used.")]
+        /// <remarks>This property was marked as obsolete on NLog 2.0 and it may be removed in a future release.</remarks>
+        [Obsolete("This property should not be used. Marked obsolete on NLog 2.0")]
         public string LoggerShortName
         {
+            // NOTE: This property is not referenced by NLog code anymore. 
             get
             {
                 int lastDot = this.LoggerName.LastIndexOf('.');
@@ -259,6 +259,11 @@ namespace NLog
         }
 
         /// <summary>
+        /// Checks if any per-event context properties (Without allocation)
+        /// </summary>
+        public bool HasProperties { get { return this.properties != null && this.properties.Count > 0; } }
+
+        /// <summary>
         /// Gets the dictionary of per-event context properties.
         /// </summary>
         public IDictionary<object, object> Properties
@@ -267,7 +272,7 @@ namespace NLog
             {
                 if (this.properties == null)
                 {
-                    this.InitEventContext();
+                    this.properties = new Dictionary<object, object>();
                 }
 
                 return this.properties;
@@ -277,14 +282,16 @@ namespace NLog
         /// <summary>
         /// Gets the dictionary of per-event context properties.
         /// </summary>
-        [Obsolete("Use LogEventInfo.Properties instead.", true)]
+        /// <remarks>This property was marked as obsolete on NLog 2.0 and it may be removed in a future release.</remarks>
+        [Obsolete("Use LogEventInfo.Properties instead.  Marked obsolete on NLog 2.0", true)]
         public IDictionary Context
         {
+            // NOTE: This propepery is not referenced in NLog code anymore. 
             get
             {
                 if (this.eventContextAdapter == null)
                 {
-                    this.InitEventContext();
+                    this.eventContextAdapter = new DictionaryAdapter<object, object>(Properties);
                 }
 
                 return this.eventContextAdapter;
@@ -347,7 +354,8 @@ namespace NLog
         /// <param name="message">The message.</param>
         /// <param name="exception">The exception.</param>
         /// <returns>Instance of <see cref="LogEventInfo"/>.</returns>
-        [Obsolete("use Create(LogLevel logLevel, string loggerName, Exception exception, IFormatProvider formatProvider, string message)")]
+        /// <remarks>This method was marked as obsolete before NLog 4.3.11 and it may be removed in a future release.</remarks>
+        [Obsolete("use Create(LogLevel logLevel, string loggerName, Exception exception, IFormatProvider formatProvider, string message) instead. Marked obsolete before v4.3.11")]
         public static LogEventInfo Create(LogLevel logLevel, string loggerName, [Localizable(false)] string message, Exception exception)
         {
             return new LogEventInfo(logLevel, loggerName, null, message, null, exception);
@@ -414,13 +422,12 @@ namespace NLog
 
         internal string AddCachedLayoutValue(Layout layout, string value)
         {
-            lock (this.layoutCacheLock)
+            if (this.layoutCache == null)
             {
-                if (this.layoutCache == null)
-                {
-                    this.layoutCache = new Dictionary<Layout, string>();
-                }
-
+                Interlocked.CompareExchange(ref this.layoutCache, new Dictionary<Layout, string>(), null);
+            }
+            lock (this.layoutCache)
+            {
                 this.layoutCache[layout] = value;
             }
 
@@ -429,9 +436,16 @@ namespace NLog
 
         internal bool TryGetCachedLayoutValue(Layout layout, out string value)
         {
-            lock (this.layoutCacheLock)
+            if (this.layoutCache == null)
             {
-                if (this.layoutCache == null || this.layoutCache.Count == 0)
+                // We don't need lock to see if dictionary has been created
+                value = null;
+                return false;
+            }
+
+            lock (this.layoutCache)
+            {
+                if (this.layoutCache.Count == 0)
                 {
                     value = null;
                     return false;
@@ -461,20 +475,14 @@ namespace NLog
                 return true;
             }
 
-            if (parameters.Length >= 2)
+            if (parameters.Length >= 2 && !IsSafeToDeferFormatting(parameters[1]))
             {
-                if (!IsSafeToDeferFormatting(parameters[1]))
-                {
-                    return true;
-                }
+                return true;
             }
 
-            if (parameters.Length >= 3)
+            if (parameters.Length >= 3 && !IsSafeToDeferFormatting(parameters[2]))
             {
-                if (!IsSafeToDeferFormatting(parameters[2]))
-                {
-                    return true;
-                }
+                return true;
             }
 
             return false;
@@ -518,12 +526,6 @@ namespace NLog
         private void ResetFormattedMessage()
         {
             this.formattedMessage = null;
-        }
-
-        private void InitEventContext()
-        {
-            this.properties = new Dictionary<object, object>();
-            this.eventContextAdapter = new DictionaryAdapter<object, object>(this.properties);
         }
     }
 }
